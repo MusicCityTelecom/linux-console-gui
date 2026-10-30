@@ -36,8 +36,8 @@ class PlatformTests(unittest.TestCase):
         worker=Session(dict(protocol='Local terminal'));received=[];errors=[]
         worker.received.connect(received.append);worker.failed.connect(errors.append);worker.start()
         try:
-            worker.send(b'echo WINDOWS_TERMINAL_OK_739\r')
-            self.assertTrue(pump_until(lambda:b'\r\nWINDOWS_TERMINAL_OK_739\r\n' in b''.join(received),timeout=20))
+            worker.send(b'echo WINDOWS_TERMINAL_OK_7^39\r')
+            self.assertTrue(pump_until(lambda:b'WINDOWS_TERMINAL_OK_739' in b''.join(received),timeout=20),msg=repr(b''.join(received))+repr(errors))
         finally:worker.stop();self.assertTrue(worker.wait(5000))
         self.assertFalse(errors)
 

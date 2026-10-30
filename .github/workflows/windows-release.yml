@@ -2,7 +2,7 @@ name: Windows release
 on:
   push:
     branches: [main]
-    paths: [version.py, .github/workflows/windows-release.yml]
+    paths: ['**.py', 'requirements*.txt', 'scripts/**', 'install-source.ps1', 'docs/WINDOWS.md', '.github/workflows/windows-release.yml']
   workflow_dispatch:
 permissions:
   contents: write
@@ -24,6 +24,12 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m unittest -v
+      - name: Verify Windows source installer
+        shell: pwsh
+        run: |
+          $env:PY_PYTHON = '3.12'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-source.ps1 -InstallDir "$env:RUNNER_TEMP\SerialDesk-Source"
+          if ($LASTEXITCODE -ne 0) { throw 'Source installation failed.' }
       - name: Locate or install Inno Setup
         shell: pwsh
         run: |

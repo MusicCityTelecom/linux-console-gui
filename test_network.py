@@ -143,7 +143,7 @@ class NetworkTests(unittest.TestCase):
     def test_update_version_and_checksum(self):
         self.assertGreater(version_tuple('v1.10.0'),version_tuple('1.2.0'))
         with self.assertRaises(ValueError): version_tuple('v1.2.0-rc1')
-        with patch('updates.get_url',return_value=json.dumps(dict(tag_name='v0.9.0')).encode()): self.assertIsNone(latest_release())
+        with patch('updates.get_url',return_value=json.dumps(dict(tag_name='v0.9.0')).encode()): self.assertIsNone(latest_release(windows=False))
         release=dict(tag_name='v1.0.1',assets=[dict(name='SHA256SUMS',browser_download_url='sums'),dict(name='serial-desk_1.0.1_all.deb',browser_download_url='deb')])
         with tempfile.TemporaryDirectory() as d, patch('updates.get_url',side_effect=[('0'*64+'  serial-desk_1.0.1_all.deb\n').encode(),b'tampered']):
             with self.assertRaises(ValueError): download_release(release,'deb',d)

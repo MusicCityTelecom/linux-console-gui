@@ -613,11 +613,11 @@ def run_smoke_test(app,window,report):
         window.local.toggle()
         worker=window.local.worker
         worker.failed.disconnect();worker.failed.connect(finish);worker.received.connect(received.append)
-        command=b'echo SERIAL_DESK_BUNDLE_OK\r' if sys.platform=='win32' else b"printf 'SERIAL_DESK_BUNDLE_OK\\n'\r"
+        command=b'echo SERIAL_DESK_BUNDLE_O^K\r' if sys.platform=='win32' else b"printf 'SERIAL_DESK_BUNDLE_%s\\n' OK\r"
         worker.send(command);timer.start(50)
     def tick():
-        if b'\r\nSERIAL_DESK_BUNDLE_OK\r\n' in b''.join(received): finish()
-        elif time.monotonic()-started>20: finish('Local terminal did not produce the expected response')
+        if b'SERIAL_DESK_BUNDLE_OK' in b''.join(received): finish()
+        elif time.monotonic()-started>20: finish('Local terminal did not produce the expected response: '+repr(b''.join(received)[-2000:]))
     timer.timeout.connect(tick);QTimer.singleShot(0,begin)
 
 
