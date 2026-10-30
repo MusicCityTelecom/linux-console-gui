@@ -1,4 +1,5 @@
 """Thread-owned network and local PTY transports. No saved passwords."""
+import io
 import base64
 import hashlib
 import os
@@ -73,15 +74,43 @@ class TrustPolicy(paramiko.MissingHostKeyPolicy):
         os.chmod(CONFIG / 'known_hosts', 0o600)
 
 
+def private_key_from_text(text, passphrase=None):
+    errors=[]
+    for name in ('Ed25519Key','ECDSAKey','RSAKey','DSSKey'):
+        key_class=getattr(paramiko,name,None)
+        if key_class:
+            try: return key_class.from_private_key(io.StringIO(text),password=passphrase or None)
+            except (paramiko.SSHException,ValueError) as e: errors.append(e)
+    raise ValueError('Could not unlock the saved private key. Check its format and passphrase.')
+
+
+class SharedSSH:
+    """Reference-count an authenticated client across independent shell/file channels."""
+    def __init__(self,client):
+        self.client=client; self._references=1; self._lock=threading.Lock()
+    def acquire(self):
+        with self._lock:
+            transport=self.client.get_transport()
+            if self._references<=0 or not transport or not transport.is_active(): raise RuntimeError('SSH connection is no longer active.')
+            self._references+=1
+        return self
+    def release(self):
+        with self._lock:
+            if self._references<=0: return
+            self._references-=1
+            if self._references==0: self.client.close()
+
+
 def ssh_connect(settings, ask):
     c = paramiko.SSHClient()
     c.load_system_host_keys()
     if (CONFIG / 'known_hosts').exists(): c.load_host_keys(str(CONFIG / 'known_hosts'))
     c.set_missing_host_key_policy(TrustPolicy(ask))
     try:
+        pkey=private_key_from_text(settings['key_data'],settings.get('passphrase') or settings.get('password')) if settings.get('key_data') else None
         c.connect(settings['host'], port=int(settings.get('port', 22)), username=settings.get('user') or None,
-                  password=settings.get('password') or None, key_filename=settings.get('key') or None,
-                  passphrase=settings.get('password') or None, timeout=10, banner_timeout=10, auth_timeout=15,
+                  password=settings.get('password') or None, key_filename=(settings.get('key') or None) if not pkey else None, pkey=pkey,
+                  passphrase=settings.get('passphrase') or settings.get('password') or None, timeout=10, banner_timeout=10, auth_timeout=15,
                   allow_agent=True, look_for_keys=True)
         c.get_transport().set_keepalive(30)
         return c
@@ -114,7 +143,7 @@ class Session(QThread):
     question = pyqtSignal(str, str)
     def __init__(self, settings, parent=None):
         super().__init__(parent); self.settings = settings; self.output = queue.Queue(maxsize=1024)
-        self.event = threading.Event(); self.answer = False; self.dimensions = (120, 40)
+        self.event = threading.Event(); self.answer = False; self.dimensions = (120, 40); self.ssh_handle = None
     def ask(self, title, text):
         self.event.clear(); self.question.emit(title, text)
         while not self.event.wait(.1):
@@ -138,6 +167,7 @@ class Session(QThread):
                 os.close(slave)
             elif protocol == 'SSH':
                 client = ssh_connect(s, self.ask)
+                self.ssh_handle = SharedSSH(client)
                 channel = client.invoke_shell(term='vt100', width=120, height=40); channel.settimeout(.2)
             else:
                 sock = socket.create_connection((s['host'], int(s['port'])), timeout=10)
@@ -151,7 +181,8 @@ class Session(QThread):
                     sock = context.wrap_socket(sock, server_hostname=s['host'])
                     self.state.emit('TLS: ' + sock.version())
                 sock.settimeout(.1)
-            self.settings.pop('password', None)
+
+            for secret in ('password','passphrase','key_data'): self.settings.pop(secret, None)
             self.state.emit('Connected')
             while not self.isInterruptionRequested():
                 try: data = self.output.get_nowait()
@@ -185,11 +216,15 @@ class Session(QThread):
         except Exception as e:
             if not self.isInterruptionRequested(): self.failed.emit(str(e))
         finally:
-            self.settings.pop('password', None)
-            for resource in (channel, client, sock):
+
+            for secret in ('password','passphrase','key_data'): self.settings.pop(secret, None)
+            for resource in (channel, sock):
                 if resource:
                     try: resource.close()
                     except Exception: pass
+            if self.ssh_handle:
+                self.ssh_handle.release(); self.ssh_handle=None
+            elif client: client.close()
             if master is not None: os.close(master)
             if process and process.poll() is None:
                 import signal

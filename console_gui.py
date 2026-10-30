@@ -5,12 +5,14 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings
 from PyQt5.QtGui import QColor, QFont, QTextCursor, QKeySequence
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFormLayout, QGroupBox, QComboBox, QPushButton, QLabel, QCheckBox, QPlainTextEdit,
     QLineEdit, QFileDialog, QMessageBox, QInputDialog, QSplitter, QDialog, QTableWidget,
-    QTableWidgetItem, QHeaderView, QShortcut, QScrollArea, QTabWidget, QSizePolicy)
+    QTableWidgetItem, QHeaderView, QShortcut, QScrollArea, QTabWidget, QSizePolicy, QToolButton, QTabBar)
+from credential_vault import CredentialVault, VaultError
+from profile_ui import SecurityMenu, unlock_vault
 from version import VERSION
 from network_ui import NetworkConsole, FileBrowser, Notepad
 from updates import UpdateController
@@ -191,18 +193,16 @@ class DetectionDialog(QDialog):
         super().done(result)
 
 
-class Window(QMainWindow):
-    def __init__(self):
+class SerialConsole(QWidget):
+    title_changed=pyqtSignal(str)
+    profiles_changed=pyqtSignal()
+    def __init__(self,store=None):
         super().__init__()
         self.serial = None; self.log = None; self.rx = 0; self.tx = 0
         self.decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
-        self.setWindowTitle(f'Serial Desk {VERSION}'); self.setMinimumSize(640, 420)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
-        screen = QApplication.primaryScreen().availableGeometry()
-        self.resize(min(1280, screen.width()-40), min(850, screen.height()-60))
         profile_error = None
         try:
-            self.store = ProfileStore()
+            self.store = store or ProfileStore()
         except (ValueError, OSError, TypeError) as e:
             # Keep a damaged file intact until the user explicitly saves again.
             profile_error = str(e)
@@ -214,8 +214,8 @@ class Window(QMainWindow):
                 profile_error += f'\nOriginal file preserved at {backup}'
             except OSError:
                 pass
-        self.tabs = QTabWidget(); self.setCentralWidget(self.tabs)
-        root = QWidget(); self.tabs.addTab(root, 'Serial')
+        root = self
+        self.message=QLabel()
         outer = QVBoxLayout(root); outer.setContentsMargins(24, 20, 24, 20); outer.setSpacing(16)
         header = QHBoxLayout(); outer.addLayout(header)
         title = QLabel('SERIAL DESK'); title.setObjectName('title'); header.addWidget(title)
@@ -246,6 +246,8 @@ class Window(QMainWindow):
         row = QHBoxLayout(); pf.addLayout(row)
         for name, callback in [('Load', self.load_profile), ('Save…', self.save_profile), ('Delete', self.delete_profile)]:
             b = QPushButton(name); b.clicked.connect(callback); row.addWidget(b)
+        self.auto_profile=QCheckBox('Connect when profile selected'); pf.addWidget(self.auto_profile)
+        self.profiles.activated[str].connect(self.selected_profile)
         side.addStretch()
         note = QLabel('Settings stay on this computer.\nDirect keyboard input • UTF-8 text\nHex view for binary traffic')
         note.setWordWrap(True); note.setObjectName('muted'); side.addWidget(note)
@@ -271,54 +273,21 @@ class Window(QMainWindow):
         for name, callback in [('Ctrl+C', lambda: self.send(b'\x03')), ('Enter', lambda: self.send(b'\r')), ('Send break', self.send_break)]:
             b = QPushButton(name); b.clicked.connect(callback); controls.addWidget(b)
         controls.addStretch(); self.counts = QLabel('RX 0 B    TX 0 B'); controls.addWidget(self.counts)
+        outer.addWidget(self.message)
         self.statusBar().showMessage('Ready • select a port and connect')
         self.refresh_ports(); self.refresh_profiles(); self.apply(self.store.last)
         self.timer = QTimer(self); self.timer.timeout.connect(self.poll); self.timer.start(30)
         self.port_timer = QTimer(self); self.port_timer.timeout.connect(self.auto_refresh); self.port_timer.start(3000)
-        self.apply_style()
-        self.network = NetworkConsole(Terminal); self.files = FileBrowser(); self.notes = Notepad(); self.local = NetworkConsole(Terminal, local=True)
-        self.tabs.addTab(self.network, 'SSH / Telnet'); self.tabs.addTab(self.files, 'Files'); self.tabs.addTab(self.notes, 'Notepad'); self.tabs.addTab(self.local, 'Local terminal')
-        view = self.menuBar().addMenu('View')
-        view.addAction('Maximize / restore', lambda: self.showNormal() if self.isMaximized() else self.showMaximized(), 'F11')
-        view.addAction('Show / hide serial settings', lambda: self.sidebar.setVisible(not self.sidebar.isVisible()), 'Ctrl+B')
-        view.addAction('Larger console text', lambda: self.zoom_console(1), 'Ctrl++')
-        view.addAction('Smaller console text', lambda: self.zoom_console(-1), 'Ctrl+-')
-        self.updates = UpdateController(self)
         split.setStretchFactor(1,1)
-        if profile_error:
-            QTimer.singleShot(0, lambda: self.error('Profiles could not be read', profile_error))
-
-    def zoom_console(self, amount):
-        for terminal in (self.terminal, self.network.terminal, self.local.terminal): terminal.zoomIn(amount)
-
+        if profile_error: QTimer.singleShot(0,lambda:self.error('Profiles could not be read',profile_error))
+    def statusBar(self): return self
+    def showMessage(self,text): self.message.setText(text)
+    def selected_profile(self,name):
+        self.load_profile()
+        if self.auto_profile.isChecked() and not self.serial: self.toggle_connection()
     @staticmethod
     def combo(items, selected, editable=False):
         w = QComboBox(); w.addItems(items); w.setEditable(editable); w.setCurrentText(selected); return w
-
-    def apply_style(self):
-        self.setStyleSheet('''
-            QTabWidget::pane { border: 0; }
-            QTabBar::tab { background: #243449; padding: 10px 20px; }
-            QTabBar::tab:selected { background: #326e91; }
-            QScrollArea { border: 0; }
-            QWidget { background: #121a25; color: #dce6f2; font-size: 13px; }
-            QGroupBox { border: 1px solid #2c3b4d; border-radius: 8px; margin-top: 12px; padding: 18px 12px 12px; font-weight: bold; }
-            QGroupBox::title { subcontrol-origin: margin; left: 12px; color: #8aa1bb; }
-            QComboBox, QLineEdit { background: #1c2939; border: 1px solid #34465e; border-radius: 5px; padding: 7px; }
-            QComboBox QAbstractItemView { background: #1c2939; selection-background-color: #326e91; }
-            QPushButton { background: #243449; border: 1px solid #354b65; border-radius: 5px; padding: 8px 12px; }
-            QPushButton:hover { background: #304965; }
-            QPushButton:disabled, QComboBox:disabled { color: #64748b; }
-            QPushButton#primary { background: #46c6ac; color: #0c2722; font-weight: bold; padding: 11px; }
-            QLabel#title { font-size: 23px; font-weight: bold; letter-spacing: 3px; color: #f2f7ff; }
-            QLabel#state { color: #8aa1bb; } QLabel#muted { color: #8095ad; line-height: 1.5; }
-            QPlainTextEdit { background: #090f18; color: #bce4da; border: 1px solid #2c3b4d; border-radius: 8px; padding: 12px; font-size: 14px; }
-            QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #64748b; border-radius: 3px; background: #1c2939; }
-            QCheckBox::indicator:checked { background: #46c6ac; border: 1px solid #46c6ac; }
-            QStatusBar { color: #8aa1bb; } QSplitter::handle { background: #121a25; }
-            QTableWidget { background: #101925; gridline-color: #34465e; }
-            QHeaderView::section { background: #243449; padding: 7px; }
-        ''')
 
     def error(self, title, error):
         QMessageBox.warning(self, title, str(error))
@@ -377,6 +346,7 @@ class Window(QMainWindow):
         self.state.setStyleSheet('color: #46c6ac')
         self.statusBar().showMessage(f"{s['port']} • {s['baudrate']:,} baud • {s['bytesize']}{s['parity']}{s['stopbits']:g}")
         self.terminal.setFocus()
+        self.title_changed.emit(s['port'])
         self.store.last = s
         self.persist()
 
@@ -481,12 +451,12 @@ class Window(QMainWindow):
         if not ok or not name.strip(): return
         name = name.strip()
         if name in self.store.profiles and QMessageBox.question(self, 'Replace profile', f'Replace “{name}”?') != QMessageBox.Yes: return
-        self.store.profiles[name] = settings; self.persist(); self.refresh_profiles(); self.profiles.setCurrentText(name)
+        self.store.profiles[name] = settings; self.persist(); self.refresh_profiles(); self.profiles.setCurrentText(name); self.profiles_changed.emit()
 
     def delete_profile(self):
         name = self.profiles.currentText()
         if name in self.store.profiles and QMessageBox.question(self, 'Delete profile', f'Delete “{name}”?') == QMessageBox.Yes:
-            del self.store.profiles[name]; self.persist(); self.refresh_profiles()
+            del self.store.profiles[name]; self.persist(); self.refresh_profiles(); self.profiles_changed.emit()
 
     def detect_baud(self):
         try: settings = self.settings()
@@ -495,16 +465,138 @@ class Window(QMainWindow):
         if dialog.exec_() == QDialog.Accepted and dialog.selected:
             self.baud.setCurrentText(dialog.selected)
 
-    def closeEvent(self, event):
-        if (self.files.task and self.files.task.isRunning()) or (self.updates.task and self.updates.task.isRunning()):
-            QMessageBox.information(self, 'Operation in progress', 'Please let the file transfer or update operation finish before closing.')
-            event.ignore(); return
-        try: self.store.last = self.settings()
+    def shutdown(self):
+        self.timer.stop(); self.port_timer.stop()
+        try: self.store.last=self.settings()
         except ValueError: pass
-        self.network.shutdown(); self.files.shutdown(); self.notes.shutdown(); self.local.shutdown(); self.updates.shutdown()
         self.persist(); self.disconnect()
-        if self.log: self.log.close()
-        event.accept()
+        if self.log: self.log.close(); self.log=None
+    def closeEvent(self,event): self.shutdown(); event.accept()
+
+
+class Window(QMainWindow):
+    def __init__(self,vault=None):
+        super().__init__()
+        self.vault=vault or CredentialVault()
+        if self.vault.locked: raise VaultError('Unlock Serial Desk before opening the main window.')
+        config=QSettings('MusicCityTelecom','SerialDesk')
+        try: legacy=json.loads(config.value('network_profiles','{}'))
+        except (ValueError,TypeError): legacy={}
+        self.vault.migrate_legacy(legacy if isinstance(legacy,dict) else {})
+        self.setWindowTitle(f'Serial Desk {VERSION}'); self.setMinimumSize(640,420)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        screen=QApplication.primaryScreen().availableGeometry()
+        self.resize(min(1280,screen.width()-40),min(850,screen.height()-60))
+        self.tabs=QTabWidget(); self.tabs.setMovable(True); self.tabs.setTabsClosable(True); self.tabs.setUsesScrollButtons(True)
+        self.setCentralWidget(self.tabs); self.tabs.tabCloseRequested.connect(self.close_tab)
+        self.tabs.tabBarDoubleClicked.connect(self.rename_tab)
+        self.serial_tab=self.new_serial(); self.network=self.new_network(); self.files=self.new_files()
+        self.notes=Notepad(); self.add_tab(self.notes,'Notepad'); self.local=self.new_network(local=True)
+        self.tabs.setCurrentIndex(0)
+        sessions=self.menuBar().addMenu('Sessions')
+        sessions.addAction('New SSH / Telnet tab',lambda:self.new_network(),'Ctrl+T')
+        sessions.addAction('New serial tab',self.new_serial,'Ctrl+Shift+T')
+        sessions.addAction('New file browser tab',self.new_files,'Ctrl+Shift+F')
+        sessions.addAction('New local terminal tab',lambda:self.new_network(local=True),'Ctrl+Shift+L')
+        sessions.addAction('Close current tab',lambda:self.close_tab(self.tabs.currentIndex()),'Ctrl+W')
+        plus=QToolButton(); plus.setText('+'); plus.setToolTip('New session'); plus.setMenu(sessions); plus.setPopupMode(QToolButton.InstantPopup)
+        self.tabs.setCornerWidget(plus,Qt.TopRightCorner)
+        view=self.menuBar().addMenu('View')
+        view.addAction('Maximize / restore',lambda:self.showNormal() if self.isMaximized() else self.showMaximized(),'F11')
+        view.addAction('Show / hide serial settings',self.toggle_sidebar,'Ctrl+B')
+        view.addAction('Larger console text',lambda:self.zoom_console(1),'Ctrl++')
+        view.addAction('Smaller console text',lambda:self.zoom_console(-1),'Ctrl+-')
+        self.security=SecurityMenu(self,self.vault); self.updates=UpdateController(self); self.apply_style()
+    def widgets(self): return [self.tabs.widget(i) for i in range(self.tabs.count())]
+    def add_tab(self,widget,title):
+        index=self.tabs.addTab(widget,title); self.tabs.setCurrentIndex(index)
+        if isinstance(widget,Notepad):
+            self.tabs.tabBar().setTabButton(index,QTabBar.RightSide,None)
+        else:
+            close=QToolButton(); close.setText('×'); close.setToolTip('Close tab'); close.setAutoRaise(True)
+            close.setStyleSheet('color: #dce6f2; background: transparent; padding: 1px 4px; font-size: 17px')
+            close.clicked.connect(lambda:self.close_tab(self.tabs.indexOf(widget)))
+            self.tabs.tabBar().setTabButton(index,QTabBar.RightSide,close)
+        if hasattr(widget,'title_changed'): widget.title_changed.connect(lambda text:self.name_tab(widget,text))
+        if hasattr(widget,'profile_bar'): widget.profile_bar.changed.connect(self.refresh_profiles)
+        return widget
+    def name_tab(self,widget,title):
+        index=self.tabs.indexOf(widget)
+        if index>=0: self.tabs.setTabText(index,title[:35]); self.tabs.setTabToolTip(index,title)
+    def new_serial(self):
+        store=getattr(self,'serial_store',None)
+        widget=SerialConsole(store); self.serial_store=widget.store; widget.profiles_changed.connect(self.refresh_profiles)
+        return self.add_tab(widget,'Serial')
+    def new_network(self,local=False):
+        widget=NetworkConsole(Terminal,local=local,vault=self.vault)
+        widget.browse_requested.connect(self.browse_ssh); widget.duplicate_requested.connect(self.duplicate_session)
+        return self.add_tab(widget,'Local terminal' if local else 'SSH / Telnet')
+    def new_files(self): return self.add_tab(FileBrowser(self.vault),'Files')
+    def browse_ssh(self,source,protocol):
+        if not source.worker or not source.worker.ssh_handle: return
+        widget=self.new_files()
+        try: widget.attach_ssh(source.worker.ssh_handle,protocol,source.last_settings)
+        except Exception as e: QMessageBox.warning(self,'File browser',str(e))
+    def duplicate_session(self,source):
+        local=source.credentials.protocol.currentText()=='Local terminal'
+        widget=self.new_network(local=local)
+        widget.credentials.apply(source.last_settings or source.credentials.values())
+        # Copy selected saved profile on purpose; never auto-send credentials or commands on duplication.
+        name=source.profile_bar.combo.currentText()
+        if name:
+            widget.profile_bar.combo.setCurrentText(name); widget.profile_bar.load()
+    def rename_tab(self,index):
+        if index<0: return
+        title,ok=QInputDialog.getText(self,'Rename tab','Tab name:',text=self.tabs.tabText(index))
+        if ok and title.strip(): self.tabs.setTabText(index,title.strip())
+    def refresh_profiles(self):
+        for widget in self.widgets():
+            if hasattr(widget,'profile_bar'): widget.profile_bar.refresh()
+            if isinstance(widget,SerialConsole): widget.refresh_profiles()
+    def toggle_sidebar(self):
+        widget=self.tabs.currentWidget()
+        if isinstance(widget,SerialConsole): widget.sidebar.setVisible(not widget.sidebar.isVisible())
+    def zoom_console(self,amount):
+        widget=self.tabs.currentWidget()
+        if hasattr(widget,'terminal'): widget.terminal.zoomIn(amount)
+    def busy(self,widget):
+        return isinstance(widget,FileBrowser) and ((widget.task and widget.task.isRunning()) or bool(getattr(widget,'pending_transfers',False)))
+    def close_tab(self,index):
+        widget=self.tabs.widget(index)
+        if not widget or widget is self.notes: return
+        if self.busy(widget): QMessageBox.information(self,'Transfer in progress','Let the current file operation finish before closing this tab.'); return
+        active=(isinstance(widget,SerialConsole) and widget.serial is not None) or (isinstance(widget,NetworkConsole) and widget.worker and widget.worker.isRunning()) or (isinstance(widget,FileBrowser) and widget.remote)
+        if active and QMessageBox.question(self,'Close session','Disconnect and close this tab?')!=QMessageBox.Yes: return
+        widget.shutdown(); self.tabs.removeTab(index); widget.deleteLater()
+    def closeEvent(self,event):
+        if any(self.busy(w) for w in self.widgets()) or (self.updates.task and self.updates.task.isRunning()):
+            QMessageBox.information(self,'Operation in progress','Please let file transfers and updates finish before closing.'); event.ignore(); return
+        for widget in self.widgets(): widget.shutdown()
+        self.updates.shutdown(); self.vault.lock(); event.accept()
+    def apply_style(self):
+        self.setStyleSheet('''
+            QTabWidget::pane { border: 0; }
+            QTabBar::tab { background: #243449; padding: 10px 20px; }
+            QTabBar::tab:selected { background: #326e91; }
+            QScrollArea { border: 0; }
+            QWidget { background: #121a25; color: #dce6f2; font-size: 13px; }
+            QGroupBox { border: 1px solid #2c3b4d; border-radius: 8px; margin-top: 12px; padding: 18px 12px 12px; font-weight: bold; }
+            QGroupBox::title { subcontrol-origin: margin; left: 12px; color: #8aa1bb; }
+            QComboBox, QLineEdit { background: #1c2939; border: 1px solid #34465e; border-radius: 5px; padding: 7px; }
+            QComboBox QAbstractItemView { background: #1c2939; selection-background-color: #326e91; }
+            QPushButton { background: #243449; border: 1px solid #354b65; border-radius: 5px; padding: 8px 12px; }
+            QPushButton:hover { background: #304965; }
+            QPushButton:disabled, QComboBox:disabled { color: #64748b; }
+            QPushButton#primary { background: #46c6ac; color: #0c2722; font-weight: bold; padding: 11px; }
+            QLabel#title { font-size: 23px; font-weight: bold; letter-spacing: 3px; color: #f2f7ff; }
+            QLabel#state { color: #8aa1bb; } QLabel#muted { color: #8095ad; line-height: 1.5; }
+            QPlainTextEdit { background: #090f18; color: #bce4da; border: 1px solid #2c3b4d; border-radius: 8px; padding: 12px; font-size: 14px; }
+            QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #64748b; border-radius: 3px; background: #1c2939; }
+            QCheckBox::indicator:checked { background: #46c6ac; border: 1px solid #46c6ac; }
+            QStatusBar { color: #8aa1bb; } QSplitter::handle { background: #121a25; }
+            QTableWidget { background: #101925; gridline-color: #34465e; }
+            QHeaderView::section { background: #243449; padding: 7px; }
+        ''')
 
 
 def main():
@@ -512,7 +604,12 @@ def main():
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv); app.setApplicationName('Serial Desk'); app.setOrganizationName('Local Tools')
     app.setStyle('Fusion')
-    window = Window(); window.show()
+    try:
+        vault=CredentialVault()
+        if not unlock_vault(vault): return
+        window=Window(vault); window.show()
+    except (VaultError,OSError) as e:
+        QMessageBox.critical(None,'Serial Desk could not open',str(e)); return
     sys.exit(app.exec_())
 
 

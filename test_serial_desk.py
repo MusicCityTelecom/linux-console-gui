@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from PyQt5.QtTest import QTest
 from serial_core import DEFAULTS, ProfileStore, open_port, text_score, scan_rates
-from console_gui import Window, Terminal
+from console_gui import SerialConsole, Terminal
 
 APP = QApplication.instance() or QApplication([])
 
@@ -72,7 +72,7 @@ class SerialDeskTests(unittest.TestCase):
     def test_real_pseudo_terminal_rx_tx_log_disconnect(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, XDG_CONFIG_HOME=d):
             master, slave = pty.openpty()
-            w = Window()
+            w = SerialConsole()
             errors = []; w.error = lambda title, msg: errors.append((title, str(msg)))
             w.port.setCurrentText(os.ttyname(slave))
             w.toggle_connection()

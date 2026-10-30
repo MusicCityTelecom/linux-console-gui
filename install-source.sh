@@ -7,14 +7,14 @@ export SOURCE DEST BIN
 python3 - <<'PY'
 import importlib.util, os, pathlib, shutil, subprocess, sys
 src=pathlib.Path(os.environ['SOURCE']); dest=pathlib.Path(os.environ['DEST']); bindir=pathlib.Path(os.environ['BIN'])
-missing=[m for m in ('PyQt5','serial','paramiko','scp') if importlib.util.find_spec(m) is None]
+missing=[m for m in ('PyQt5','serial','paramiko','scp','cryptography') if importlib.util.find_spec(m) is None]
 if missing:
-    sys.exit('Missing dependencies: '+', '.join(missing)+'\nOn Debian/Ubuntu: sudo apt install python3-pyqt5 python3-serial python3-paramiko python3-scp xterm')
+    sys.exit('Missing dependencies: '+', '.join(missing)+'\nOn Debian/Ubuntu: sudo apt install python3-pyqt5 python3-serial python3-paramiko python3-scp python3-cryptography xterm')
 # Versioned directories keep the current installation usable if a later copy fails.
 version={}; exec((src/'version.py').read_text(),version)
 release=dest/('version-'+version['VERSION']); stage=dest/('staging-'+str(os.getpid()))
 stage.mkdir(parents=True)
-for name in ('console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','version.py','serial-desk.svg','LICENSE','README.md'):
+for name in ('console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','credential_vault.py','profile_ui.py','version.py','serial-desk.svg','LICENSE','README.md'):
     shutil.copy2(src/name,stage/name)
 (stage/'INSTALL_MODE').write_text('source\n')
 if release.exists():

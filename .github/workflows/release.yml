@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y python3-pyqt5 python3-serial python3-paramiko python3-scp
+      - run: sudo apt-get update && sudo apt-get install -y python3-pyqt5 python3-serial python3-paramiko python3-scp python3-cryptography
       - run: QT_QPA_PLATFORM=offscreen /usr/bin/python3 -m unittest -v
       - run: /usr/bin/python3 scripts/build-release.py
       - name: Publish versioned release

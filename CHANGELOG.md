@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 — 2026-10-30
+
+- Multiple independent, movable and closable serial, network, file-browser and local-terminal tabs; new-session menu, tab renaming and duplication.
+- One-click SFTP/SCP file tabs from SSH reuse the authenticated connection, with independent channel lifetime.
+- Multi-file upload/download, local-file drag-and-drop upload and transfer queue handling.
+- AES-256-GCM credential vault with optional scrypt-derived master-password unlock at startup.
+- Optional saved passwords, separate key passphrases, private-key references or encrypted key copies, and profile-select auto-connect.
+- Shared profiles across tabs, legacy non-secret profile migration and console text search.
+- Regression coverage includes real SFTP/SCP round trips on one SSH transport, tab lifecycle and vault security.
+
 ## 1.0.0 — 2026-10-30
 
 First public release of Serial Desk.
