@@ -14,7 +14,7 @@ if missing:
 version={}; exec((src/'version.py').read_text(),version)
 release=dest/('version-'+version['VERSION']); stage=dest/('staging-'+str(os.getpid()))
 stage.mkdir(parents=True)
-for name in ('console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','version.py','serial-desk.svg','LICENSE','README.md'):
+for name in ('console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','device_profiles.py','ui_settings.py','tftp_transfer.py','version.py','serial-desk.svg','LICENSE','README.md'):
     shutil.copy2(src/name,stage/name)
 (stage/'INSTALL_MODE').write_text('source\n')
 if release.exists():

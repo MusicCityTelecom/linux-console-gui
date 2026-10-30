@@ -4,11 +4,15 @@ A native Linux and Windows desktop toolkit for serial consoles, network maintena
 
 ## Features
 
+- **Shared devices and groups:** SSH, SFTP and SCP use the same saved device entries. Group and search filters, atomic device renaming, and **Devices → Saved devices and groups** make large connection lists easier to manage. Shell and file ports are kept separately; editing one view updates the same record in the other.
+- **Companion services:** enable **Open remote files with SSH** and choose SFTP, SCP, FTP, FTPS or TFTP. SFTP/SCP on the same port reuse the authenticated SSH connection. Separate FTP/FTPS logins are stored separately from SSH; without a saved file-service login the tab asks you to enter one. Automatic companion tabs keep the console selected.
+- **Visible console focus:** blinking block/bar cursor at the remote insertion point, mint focus borders, keyboard-focus hints and configurable interface/console fonts, blink and scrollback under **Settings → Console appearance**.
+
 - **Serial console:** detected ports (USB adapters first), editable device paths, custom baud, data bits, parity, stop bits, software/hardware flow control, initial DTR/RTS states, text and hexadecimal sending, Ctrl+C, break, copy/paste, RX/TX counters, profiles and session logging.
 - **Baud scan:** passive sampling of common rates from 300 through 921600. Needs a device transmitting repeated readable text; candidates must be verified. Binary or silent devices cannot be reliably detected.
 - **SSH / Telnet:** interactive SSH, Telnet, and Mitel SSL/TLS Telnet on port **2000**. SSH keys/agent/passwords are supported. Unknown SSH fingerprints require confirmation; changed known keys are rejected. Saved profiles can optionally retain passwords, key passphrases and encrypted private-key copies in the credential vault.
 - **Session tabs:** open multiple serial, SSH/Telnet, local-terminal and file-browser sessions. Drag tabs to reorder; double-click a title to rename; close sessions independently. Ctrl+T opens a new network tab; the + menu offers every session type. Duplicate a connection tab and search its console output.
-- **Files:** browse SFTP, SCP, FTP and explicit FTPS servers; upload/download individual or multiple files, drag local files into the browser to upload, create folders and rename. On an authenticated SSH tab, click **SFTP ↗** or **SCP ↗** to open a new browser tab using the existing connection without another login. File tabs retain their own channel and can continue after the shell tab closes. Folder transfers are not supported. SCP mode browses using SFTP and transfers through the legacy SCP protocol, so browsing requires SFTP support on the server.
+- **Remote File Manager:** browse SFTP, SCP, FTP and explicit FTPS servers; upload/download individual or multiple files, drag local files into the browser to upload, create folders and rename. On an authenticated SSH tab, click **SFTP ↗** or **SCP ↗** to open a new browser tab using the existing connection without another login. File tabs retain their own channel and can continue after the shell tab closes. Folder transfers are not supported. SCP mode browses using SFTP and transfers through the legacy SCP protocol, so browsing requires SFTP support on the server.
 - **Notepad:** local scratchpad saved automatically, with open and save-copy actions.
 - **Local terminal:** interactive shell for ping, SSH commands and other installed tools. No elevated privileges unless you explicitly run sudo.
 - **Resizable UI:** maximize button, F11 maximize/restore, high-DPI scaling, scrollable settings, Ctrl+B to hide serial settings, and console font zoom from the View menu. Tested at 800×600.
@@ -18,7 +22,7 @@ The terminal handles basic cursor/erase sequences and UTF-8 text. It is a mainte
 
 ## Windows version
 
-Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.2.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
+Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.3.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
 
 See [Windows installation, source and build instructions](docs/WINDOWS.md). The Windows local terminal runs Command Prompt, COM ports use Windows names, and local credential keys use Windows DPAPI. Startup update checks select the matching Windows release channel.
 
@@ -27,7 +31,7 @@ See [Windows installation, source and build instructions](docs/WINDOWS.md). The 
 For **Ubuntu 24.04+ / Debian 13+** with Python 3.12 or newer:
 
 ```sh
-sudo apt install ./serial-desk_1.2.0_all.deb
+sudo apt install ./serial-desk_1.3.0_all.deb
 serial-desk
 ```
 
@@ -74,11 +78,23 @@ Plain Telnet and FTP are unencrypted. Prefer SSH/SFTP or FTPS where supported. F
 - Saved passwords/passphrases and optional private-key copies use the encrypted credential vault. Logs, notes and original private-key files are separate and may contain sensitive content.
 - Update checks contact the public GitHub API. Installation only occurs after acceptance. SHA-256 checks detect download corruption; they are not a separate code-signing system.
 
+## Shared devices, groups and companion tabs
+
+Create a device from SSH or the Remote File Manager and save it once. SSH/SFTP/SCP entries appear in both places; their settings and saved authentication are synchronized inside the encrypted vault. Existing separately named profiles are retained, since they may represent different accounts or services. Group names are optional and can be assigned from **Profile save options** or **Devices → Saved devices and groups**. Use the group filter and device/host search to narrow the list.
+
+The primary SSH port and optional remote-file service port are retained independently. SFTP/SCP shortcuts on an active SSH session open a new file tab on that connection. A saved companion service on another port uses a separate connection. FTP/FTPS credentials do not replace the device's SSH credentials. Select TFTP to open a dedicated filename-based transfer tab rather than a directory browser.
+
+To open files automatically after SSH login, check **Open remote files with SSH** and choose the companion service before saving the device. FTP/FTPS companions need their own login; only a separately remembered file-service login is used for automatic connection. TFTP requires you to enter a filename and choose Upload or Download; opening a tab does not start a transfer.
+
+## TFTP File Transfer
+
+Open it from **Sessions → New TFTP File Transfer tab** or as an SSH companion. Enter a host, UDP port (normally 69), and exact remote filename, then Upload or Download. The server must permit the operation. The client supports classic [RFC 1350](https://www.rfc-editor.org/rfc/rfc1350.html) octet-mode transfers, 512-byte blocks, timeouts/retries, duplicate-block handling and cancellation, with a conservative limit below 32 MiB. It does not implement directory listing, authentication, block-size/window negotiation or a local TFTP server. TFTP is unencrypted. Failed/cancelled downloads preserve the previous local file.
+
 ## Saved credentials and master password
 
 1. In a network or file tab, enter the host, username and authentication details. Use **Choose key file** for SSH key authentication. A separate key-passphrase field is available.
-2. Check **Save password / key passphrase** to retain those secrets. Check **Store a private-key copy in vault** to keep an encrypted copy instead of relying on the original file path. Leave it unchecked to keep just a reference to your existing key file. The original key file is never modified.
-3. Check **Auto-connect when profile selected**, then save a named profile. Choosing that profile from the list fills the settings and connects. Refreshing the list or opening the app does not start connections. **Load** fills settings without connecting. A serial tab also has an optional connect-on-selection checkbox.
+2. Check **Remember password / passphrase** to retain those secrets. Check **Store a private-key copy** to keep an encrypted copy instead of relying on the original file path. Leave it unchecked to keep just a reference to your existing key file. The original key file is never modified.
+3. Check **Auto-connect on selection**, then save a named profile. Choosing that profile from the list fills the settings and connects. Refreshing the list or opening the app does not start connections. **Load** fills settings without connecting. A serial tab also has an optional connect-on-selection checkbox.
 4. Use **Security → Set / change master password** to require a password before the main window opens. Close and reopen to lock the app. Canceling the unlock prompt exits without opening sessions. There is no forgotten-password recovery.
 
 The vault uses AES-256-GCM authenticated encryption; a master-password key is derived using scrypt with a fresh salt. Without a master password, the vault is encrypted with a random local key stored in a file restricted to your account. **Local-key mode does not protect against someone who can access your Linux account and read both files.** Master-password mode removes that local key and requires your password to decrypt the vault. Back up the vault; in local-key mode, back up `credentials.key` too. There is no automatic cloud synchronization.
@@ -86,6 +102,10 @@ The vault uses AES-256-GCM authenticated encryption; a master-password key is de
 Master-password protection covers saved network/file credentials and gates opening the application. It does not encrypt notes, serial profiles, session logs, exports or the original private-key files. An unlocked running app and authenticated sessions still hold usable secrets in memory. Set a strong master password and use your desktop's screen lock when leaving the computer.
 
 SSH host-key checks remain in effect for auto-connect. Unverified or legacy TLS connections still require explicit confirmation. Opening a file tab from SSH reuses authentication through an independent SSH channel; SFTP support is still required for directory browsing, including SCP mode.
+
+## Usability review
+
+The [1.3 review](https://github.com/MusicCityTelecom/linux-console-gui/blob/main/docs/review-1.3/REVIEW.md) records the reviewed steps, screenshots, fixes and remaining accessibility/hardware limits. The review covered shared device selection, console focus, remote-file operations and TFTP task entry.
 
 ## Build, test and release
 

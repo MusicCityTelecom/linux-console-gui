@@ -4,14 +4,16 @@ Windows 10 (1809 or later) / Windows 11, **x64**. ARM64-native and 32-bit builds
 
 ## Downloads
 
-- **`SerialDesk-1.2.0-windows-x64-setup.exe`** — recommended per-user installer. Python is bundled; no separate Python installation is needed. Installs in your Local AppData Programs directory and creates a Start-menu shortcut. A desktop shortcut is optional.
-- **`SerialDesk-1.2.0-windows-x64-portable.zip`** — extract the entire ZIP into a writable folder and open `SerialDesk.exe`. Keep `_internal` and the other files alongside the executable. “Portable” refers to the application files; profiles and notes still live in your Windows account's AppData directory.
-- **`serial-desk-1.2.0-windows-source.zip`** — full shared application source, tests, build scripts and Windows installation instructions.
+- **`SerialDesk-1.3.0-windows-x64-setup.exe`** — recommended per-user installer. Python is bundled; no separate Python installation is needed. Installs in your Local AppData Programs directory and creates a Start-menu shortcut. A desktop shortcut is optional.
+- **`SerialDesk-1.3.0-windows-x64-portable.zip`** — extract the entire ZIP into a writable folder and open `SerialDesk.exe`. Keep `_internal` and the other files alongside the executable. “Portable” refers to the application files; profiles and notes still live in your Windows account's AppData directory.
+- **`serial-desk-1.3.0-windows-source.zip`** — full shared application source, tests, build scripts and Windows installation instructions.
 - **`SHA256SUMS`** — SHA-256 checksums for the downloads.
 
 This initial Windows build is not Authenticode-signed. Windows may show an unknown-publisher warning. Verify the download source and checksum before running it; do not disable Windows security protections globally.
 
 ## Connections and files
+
+Saved devices are shared between SSH and the Remote File Manager, with group/search filters and optional companion file-service tabs. Console focus has a visible blinking cursor, with appearance options under Settings. TFTP is a separate filename-based transfer tool, not a directory browser.
 
 Detected serial devices use COM names such as `COM3`. Install your adapter's Windows driver if no ports appear. Serial settings, SSH/Telnet/Mitel TLS sessions, SFTP/SCP/FTP/FTPS transfers, tabs, profiles, notepad and master-password protection work through the shared UI. SFTP/SCP upload/download are available through the file-browser buttons; the SFTP and SCP buttons on SSH tabs reuse that authenticated connection.
 

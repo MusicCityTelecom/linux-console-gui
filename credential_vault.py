@@ -114,6 +114,13 @@ class CredentialVault:
         if self.locked: raise VaultError('Unlock the credential vault first.')
         data=json.loads(json.dumps(self._data)); data['profiles'].pop(name,None); self._write(data)
 
+    def rename_profile(self,old,new):
+        if self.locked:raise VaultError('Unlock the credential vault first.')
+        if not new.strip() or new in self._data['profiles']:raise VaultError('Choose an unused, non-empty device name.')
+        data=json.loads(json.dumps(self._data))
+        if old not in data['profiles']:raise VaultError('That device no longer exists.')
+        data['profiles'][new]=data['profiles'].pop(old);self._write(data)
+
     def migrate_legacy(self,profiles):
         if self.locked or self._data.get('migrated'): return
         data=json.loads(json.dumps(self._data))

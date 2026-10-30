@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0 — 2026-10-30
+
+- Shared device profiles across SSH/SFTP/SCP, preserving distinct shell/file ports and separate FTP/FTPS credentials.
+- Device groups, group/search filters, central device manager and atomic profile renaming.
+- Remote File Manager naming, protocol-specific tab labels, sticky Connect controls, filename filtering and meaningful empty states.
+- Optional SFTP/SCP/FTP/FTPS/TFTP companion tabs after SSH login; automatic opening preserves console focus.
+- Blinking block/bar console cursors, visible focus borders/hints, interface/console font preferences and scrollback controls.
+- Classic TFTP file upload/download with retransmission, duplicate-block handling, cancellation and protected local downloads.
+- Remote-transfer cancellation and atomic local downloads. Turning off saved passwords or private-key copies now removes older saved values.
+- Visual review and regression coverage for the device workflow, cursor, companion tabs, credential isolation, cancellation and TFTP.
+
 ## 1.2.0 — 2026-10-30
 
 - Windows 10/11 x64 edition with a per-user installer, portable application ZIP and shared-source ZIP in a separate Windows release.

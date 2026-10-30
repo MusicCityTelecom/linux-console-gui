@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed; the current so
 $Version = (& $Python -c "import runpy,sys; print(runpy.run_path(sys.argv[1])['VERSION'])" (Join-Path $SourceDir 'version.py')).Trim()
 $Release = Join-Path $InstallDir ('version-' + $Version + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Force -Path $Release | Out-Null
-$Files = @('console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','version.py','serial-desk.svg','LICENSE','README.md')
+$Files = @('console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','device_profiles.py','ui_settings.py','tftp_transfer.py','version.py','serial-desk.svg','LICENSE','README.md')
 foreach ($File in $Files) { Copy-Item -LiteralPath (Join-Path $SourceDir $File) -Destination $Release }
 Set-Content -LiteralPath (Join-Path $Release 'INSTALL_MODE') -Value 'windows-source' -Encoding ASCII
 $Shell = New-Object -ComObject WScript.Shell

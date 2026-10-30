@@ -6,13 +6,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings
-from PyQt5.QtGui import QColor, QFont, QTextCursor, QKeySequence
+from PyQt5.QtGui import QColor, QFont, QTextCursor, QKeySequence, QPainter
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFormLayout, QGroupBox, QComboBox, QPushButton, QLabel, QCheckBox, QPlainTextEdit,
     QLineEdit, QFileDialog, QMessageBox, QInputDialog, QSplitter, QDialog, QTableWidget,
     QTableWidgetItem, QHeaderView, QShortcut, QScrollArea, QTabWidget, QSizePolicy, QToolButton, QTabBar)
 from credential_vault import CredentialVault, VaultError
-from profile_ui import SecurityMenu, unlock_vault
+from profile_ui import SecurityMenu, unlock_vault, DeviceManager
+from ui_settings import ConsoleSettings, preferences, apply_palette
+from tftp_transfer import TFTPTransfer
 from version import VERSION
 from network_ui import NetworkConsole, FileBrowser, Notepad
 from updates import UpdateController
@@ -21,6 +23,7 @@ from serial_core import BAUDS, DEFAULTS, ProfileStore, open_port, ports, scan_ra
 
 class Terminal(QPlainTextEdit):
     outgoing = pyqtSignal(bytes)
+    focus_changed=pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -32,6 +35,41 @@ class Terminal(QPlainTextEdit):
         self.escape = ''
         self.escape_mode = False
         self.saved_position = 0
+        self.session_active=False;self.caret_phase=True
+        self.caret_timer=QTimer(self);self.caret_timer.setInterval(500);self.caret_timer.timeout.connect(self.blink_caret)
+        self.apply_preferences()
+        self.setAccessibleName('Interactive session console');self.setToolTip('Click to type directly into the connected session. Ctrl+Shift+C copies; Ctrl+Shift+V pastes.')
+
+    def apply_preferences(self):
+        p=preferences();font=self.font();font.setPointSize(p['font']);self.setFont(font);self.setMaximumBlockCount(p['scrollback'])
+        self.blink_enabled=p['blink'];self.cursor_shape=p['shape'];self.viewport().update()
+    def set_session_active(self,active):
+        self.session_active=active;self.caret_phase=True
+        if active and self.blink_enabled and self.hasFocus():self.caret_timer.start()
+        else:self.caret_timer.stop()
+        self.viewport().update()
+    def blink_caret(self):
+        self.caret_phase=not self.caret_phase;self.viewport().update()
+    def focusInEvent(self,event):
+        super().focusInEvent(event);self.caret_phase=True;
+        if self.session_active and self.blink_enabled:self.caret_timer.start()
+        self.focus_changed.emit(True);self.viewport().update()
+    def focusOutEvent(self,event):
+        super().focusOutEvent(event);self.caret_timer.stop();self.focus_changed.emit(False);self.viewport().update()
+    def paintEvent(self,event):
+        super().paintEvent(event)
+        if not self.session_active:return
+        if self.hasFocus() and self.blink_enabled and not self.caret_phase:return
+        cursor=QTextCursor(self.document());cursor.setPosition(min(self.saved_position,self.document().characterCount()-1));rect=self.cursorRect(cursor)
+        if not self.viewport().rect().intersects(rect):return
+        rect.setWidth(max(2,self.fontMetrics().horizontalAdvance('M')) if self.cursor_shape=='Block' else 3)
+        painter=QPainter(self.viewport());color=QColor('#46c6ac')
+        if self.hasFocus():
+            if self.cursor_shape=='Block':color.setAlpha(160)
+            painter.fillRect(rect,color)
+            if self.cursor_shape=='Block':painter.setPen(QColor('#46c6ac'));painter.drawRect(rect.adjusted(0,0,-1,-1))
+        else:painter.setPen(color);painter.drawRect(rect.adjusted(0,0,-1,-1))
+        painter.end()
 
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.Copy) and self.textCursor().hasSelection():
@@ -91,7 +129,7 @@ class Terminal(QPlainTextEdit):
                 if not cursor.atBlockEnd():
                     cursor.deleteChar()
                 cursor.insertText(ch)
-        self.saved_position = cursor.position()
+        self.saved_position = cursor.position();self.caret_phase=True;self.viewport().update()
         if follow:
             self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
 
@@ -343,7 +381,7 @@ class SerialConsole(QWidget):
         for field in self.connection_fields: field.setEnabled(False)
         self.profiles.setEnabled(False)
         self.connect_button.setText('Disconnect'); self.state.setText('●  CONNECTED')
-        self.state.setStyleSheet('color: #46c6ac')
+        self.state.setStyleSheet('color: #46c6ac');self.terminal.set_session_active(True)
         self.statusBar().showMessage(f"{s['port']} • {s['baudrate']:,} baud • {s['bytesize']}{s['parity']}{s['stopbits']:g}")
         self.terminal.setFocus()
         self.title_changed.emit(s['port'])
@@ -356,7 +394,7 @@ class SerialConsole(QWidget):
         for field in self.connection_fields: field.setEnabled(True)
         self.profiles.setEnabled(True)
         self.connect_button.setText('Connect'); self.state.setText('●  DISCONNECTED'); self.state.setStyleSheet('')
-        self.statusBar().showMessage('Disconnected')
+        self.statusBar().showMessage('Disconnected');self.terminal.set_session_active(False)
 
     def poll(self):
         if not self.serial: return
@@ -483,6 +521,7 @@ class Window(QMainWindow):
         try: legacy=json.loads(config.value('network_profiles','{}'))
         except (ValueError,TypeError): legacy={}
         self.vault.migrate_legacy(legacy if isinstance(legacy,dict) else {})
+        apply_palette();ui_font=self.font();ui_font.setPointSize(preferences()['ui_font']);QApplication.setFont(ui_font);self.setFont(ui_font)
         self.setWindowTitle(f'Serial Desk {VERSION}'); self.setMinimumSize(640,420)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
         screen=QApplication.primaryScreen().availableGeometry()
@@ -496,7 +535,8 @@ class Window(QMainWindow):
         sessions=self.menuBar().addMenu('Sessions')
         sessions.addAction('New SSH / Telnet tab',lambda:self.new_network(),'Ctrl+T')
         sessions.addAction('New serial tab',self.new_serial,'Ctrl+Shift+T')
-        sessions.addAction('New file browser tab',self.new_files,'Ctrl+Shift+F')
+        sessions.addAction('New Remote File Manager tab',self.new_files,'Ctrl+Shift+F')
+        sessions.addAction('New TFTP File Transfer tab',self.new_tftp)
         sessions.addAction('New local terminal tab',lambda:self.new_network(local=True),'Ctrl+Shift+L')
         sessions.addAction('Close current tab',lambda:self.close_tab(self.tabs.currentIndex()),'Ctrl+W')
         plus=QToolButton(); plus.setText('+'); plus.setToolTip('New session'); plus.setMenu(sessions); plus.setPopupMode(QToolButton.InstantPopup)
@@ -506,7 +546,27 @@ class Window(QMainWindow):
         view.addAction('Show / hide serial settings',self.toggle_sidebar,'Ctrl+B')
         view.addAction('Larger console text',lambda:self.zoom_console(1),'Ctrl++')
         view.addAction('Smaller console text',lambda:self.zoom_console(-1),'Ctrl+-')
+        devices=self.menuBar().addMenu('Devices');devices.addAction('Saved devices and groups…',self.manage_devices,'Ctrl+Shift+D')
+        settings=self.menuBar().addMenu('Settings');settings.addAction('Console appearance…',self.console_settings)
         self.security=SecurityMenu(self,self.vault); self.updates=UpdateController(self,startup=check_updates); self.apply_style()
+    def manage_devices(self):
+        dialog=DeviceManager(self.vault,self);dialog.changed.connect(self.refresh_profiles);dialog.open_device.connect(self.open_saved_device);dialog.exec_()
+    def open_saved_device(self,name,files):
+        p=self.vault.profiles.get(name)
+        if not p:return
+        if files:
+            protocol=p.get('file_protocol',p.get('protocol') if p.get('protocol') in ('SFTP','SCP','FTP','FTPS','TFTP') else 'SFTP')
+            widget=self.new_tftp() if protocol=='TFTP' else self.new_files()
+        else:widget=self.new_network()
+        widget.profile_bar.combo.setCurrentText(name);widget.profile_bar.load()
+        if isinstance(widget,NetworkConsole):widget.toggle()
+        elif isinstance(widget,FileBrowser):widget.connect_remote()
+    def console_settings(self):
+        dialog=ConsoleSettings(self)
+        if dialog.exec_()==QDialog.Accepted:
+            font=self.font();font.setPointSize(preferences()['ui_font']);QApplication.setFont(font);self.setFont(font)
+            for widget in self.widgets():
+                if hasattr(widget,'terminal'):widget.terminal.apply_preferences();widget.terminal.set_session_active(widget.terminal.session_active)
     def widgets(self): return [self.tabs.widget(i) for i in range(self.tabs.count())]
     def add_tab(self,widget,title):
         index=self.tabs.addTab(widget,title); self.tabs.setCurrentIndex(index)
@@ -529,14 +589,33 @@ class Window(QMainWindow):
         return self.add_tab(widget,'Serial')
     def new_network(self,local=False):
         widget=NetworkConsole(Terminal,local=local,vault=self.vault)
+        widget.companion_requested.connect(lambda source,protocol:self.browse_ssh(source,protocol,automatic=True))
         widget.browse_requested.connect(self.browse_ssh); widget.duplicate_requested.connect(self.duplicate_session)
         return self.add_tab(widget,'Local terminal' if local else 'SSH / Telnet')
-    def new_files(self): return self.add_tab(FileBrowser(self.vault),'Files')
-    def browse_ssh(self,source,protocol):
-        if not source.worker or not source.worker.ssh_handle: return
-        widget=self.new_files()
-        try: widget.attach_ssh(source.worker.ssh_handle,protocol,source.last_settings)
-        except Exception as e: QMessageBox.warning(self,'File browser',str(e))
+    def new_tftp(self):return self.add_tab(TFTPTransfer(self.vault),'TFTP File Transfer')
+    def new_files(self): return self.add_tab(FileBrowser(self.vault),'Remote File Manager')
+    def browse_ssh(self,source,protocol,automatic=False):
+        if not source.worker or not source.worker.ssh_handle:return
+        from device_profiles import for_context
+        original=self.tabs.currentWidget();settings=source.last_settings or {};name=source.profile_bar.combo.currentText();profile=self.vault.profiles.get(name,{})
+        if protocol=='TFTP':
+            widget=self.new_tftp();widget.credentials.apply(dict(settings,protocol='TFTP',port=settings.get('file_port',69)))
+        else:
+            widget=self.new_files()
+            if name:widget.profile_bar.combo.setCurrentText(name)
+            if automatic and protocol in ('SFTP','SCP') and settings.get('file_port',settings.get('port'))!=settings.get('port'):
+                widget.credentials.apply(for_context(profile,['SFTP','SCP','FTP','FTPS']) if profile else dict(settings,protocol=protocol,port=settings['file_port']))
+                widget.connect_remote()
+            elif protocol in ('SFTP','SCP'):
+                try:widget.attach_ssh(source.worker.ssh_handle,protocol,settings)
+                except Exception as e:QMessageBox.warning(self,'Remote File Manager',str(e))
+            else:
+                clean={k:v for k,v in settings.items() if k not in ('user','password','passphrase','key','key_data')}
+                widget.credentials.apply(dict(clean,protocol=protocol,port=settings.get('file_port',21),user='',password='',key='',key_data=''))
+                if profile and profile.get('file_login') and profile.get('file_remember'):
+                    widget.credentials.apply(for_context(profile,['SFTP','SCP','FTP','FTPS']));widget.connect_remote()
+                else:widget.status.setText('Companion '+protocol+' service • enter its login and Connect. SSH credentials are not sent to this service.')
+        if automatic:self.tabs.setCurrentWidget(original)
     def duplicate_session(self,source):
         local=source.credentials.protocol.currentText()=='Local terminal'
         widget=self.new_network(local=local)
@@ -560,7 +639,7 @@ class Window(QMainWindow):
         widget=self.tabs.currentWidget()
         if hasattr(widget,'terminal'): widget.terminal.zoomIn(amount)
     def busy(self,widget):
-        return isinstance(widget,FileBrowser) and ((widget.task and widget.task.isRunning()) or bool(getattr(widget,'pending_transfers',False)))
+        return isinstance(widget,(FileBrowser,TFTPTransfer)) and ((widget.task and widget.task.isRunning()) or bool(getattr(widget,'pending_transfers',False)))
     def close_tab(self,index):
         widget=self.tabs.widget(index)
         if not widget or widget is self.notes: return
@@ -579,18 +658,24 @@ class Window(QMainWindow):
             QTabBar::tab { background: #243449; padding: 10px 20px; }
             QTabBar::tab:selected { background: #326e91; }
             QScrollArea { border: 0; }
-            QWidget { background: #121a25; color: #dce6f2; font-size: 13px; }
+            QWidget { background: #121a25; color: #dce6f2; }
             QGroupBox { border: 1px solid #2c3b4d; border-radius: 8px; margin-top: 12px; padding: 18px 12px 12px; font-weight: bold; }
             QGroupBox::title { subcontrol-origin: margin; left: 12px; color: #8aa1bb; }
             QComboBox, QLineEdit { background: #1c2939; border: 1px solid #34465e; border-radius: 5px; padding: 7px; }
             QComboBox QAbstractItemView { background: #1c2939; selection-background-color: #326e91; }
             QPushButton { background: #243449; border: 1px solid #354b65; border-radius: 5px; padding: 8px 12px; }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPlainTextEdit:focus { border: 2px solid #46c6ac; }
+            QPushButton:focus { border: 2px solid #46c6ac; }
             QPushButton:hover { background: #304965; }
             QPushButton:disabled, QComboBox:disabled { color: #64748b; }
             QPushButton#primary { background: #46c6ac; color: #0c2722; font-weight: bold; padding: 11px; }
             QLabel#title { font-size: 23px; font-weight: bold; letter-spacing: 3px; color: #f2f7ff; }
             QLabel#state { color: #8aa1bb; } QLabel#muted { color: #8095ad; line-height: 1.5; }
-            QPlainTextEdit { background: #090f18; color: #bce4da; border: 1px solid #2c3b4d; border-radius: 8px; padding: 12px; font-size: 14px; }
+            QPlainTextEdit { background: #090f18; color: #bce4da; border: 1px solid #2c3b4d; border-radius: 8px; padding: 12px; }
+            QAbstractItemView::item:selected { background: #326e91; color: #ffffff; }
+            QPlainTextEdit { selection-background-color: #326e91; selection-color: #ffffff; }
+            QGroupBox::indicator { width: 14px; height: 14px; border: 1px solid #64748b; border-radius: 3px; background: #1c2939; }
+            QGroupBox::indicator:checked { background: #46c6ac; }
             QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #64748b; border-radius: 3px; background: #1c2939; }
             QCheckBox::indicator:checked { background: #46c6ac; border: 1px solid #46c6ac; }
             QStatusBar { color: #8aa1bb; } QSplitter::handle { background: #121a25; }
