@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Serial Desk
+Comment=Serial console with profiles, logging and baud scanning
+Exec=/opt/console_gui/launch.sh
+Path=/opt/console_gui
+Icon=/opt/console_gui/serial-desk.svg
+Terminal=false
+Categories=Utility;Development;
+StartupNotify=true

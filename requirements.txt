@@ -1,0 +1,4 @@
+PyQt5>=5.15,<6
+pyserial>=3.5,<4
+paramiko>=2.12,<5
+scp>=0.14,<1

@@ -1,0 +1,11 @@
+name: Test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-pyqt5 python3-serial python3-paramiko python3-scp
+      - run: QT_QPA_PLATFORM=offscreen /usr/bin/python3 -m unittest -v
