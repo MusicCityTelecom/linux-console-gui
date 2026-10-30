@@ -141,6 +141,20 @@ class TFTPTests(unittest.TestCase):
                 target=Path(d)/'download';port,received,errors,thread=self.serve(payload,False)
                 transfer('127.0.0.1',port,'config.bin',target,False,timeout=.2,retries=5);thread.join(2)
                 self.assertEqual(target.read_bytes(),payload);self.assertFalse(errors)
+    def test_completed_download_ignores_windows_udp_peer_close(self):
+        class Peer:
+            count=0
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def settimeout(self,value):pass
+            def sendto(self,data,address):pass
+            def recvfrom(self,size):
+                self.count+=1
+                if self.count==1:return b'\0\3\0\1config',('127.0.0.1',2000)
+                raise ConnectionResetError('Windows UDP peer closed')
+        with tempfile.TemporaryDirectory() as d,patch('tftp_transfer.socket.socket',return_value=Peer()):
+            target=Path(d)/'config';transfer('127.0.0.1',69,'config',target,False,timeout=.1)
+            self.assertEqual(target.read_bytes(),b'config')
     def test_error_and_cancellation_preserve_destination(self):
         with tempfile.TemporaryDirectory() as d:
             target=Path(d)/'config';target.write_bytes(b'EXISTING');port,_,_,thread=self.serve(b'',False,error=True)

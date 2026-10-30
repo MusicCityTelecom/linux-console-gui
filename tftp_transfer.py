@@ -72,6 +72,7 @@ def transfer(host,port,remote,local,upload,progress=lambda a,b:None,cancelled=la
                                 if cancelled():raise TransferCancelled('Transfer cancelled.')
                                 try:again,address=sock.recvfrom(2048)
                                 except socket.timeout:continue
+                                except ConnectionResetError:break  # Windows may report the peer closing its completed transfer port.
                                 if address==peer and again==data:sock.sendto(ack,peer)
                             break
                         block+=1

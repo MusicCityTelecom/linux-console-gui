@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1 — 2026-10-30
+
+- Treat a Windows UDP peer-close notification after the final TFTP data/ACK as a completed download, preserving correct successful-transfer handling.
+- Add a platform-independent regression test for that Windows behavior.
+
 ## 1.3.0 — 2026-10-30
 
 - Shared device profiles across SSH/SFTP/SCP, preserving distinct shell/file ports and separate FTP/FTPS credentials.

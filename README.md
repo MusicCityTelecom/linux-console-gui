@@ -22,7 +22,7 @@ The terminal handles basic cursor/erase sequences and UTF-8 text. It is a mainte
 
 ## Windows version
 
-Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.3.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
+Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.3.1). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
 
 See [Windows installation, source and build instructions](docs/WINDOWS.md). The Windows local terminal runs Command Prompt, COM ports use Windows names, and local credential keys use Windows DPAPI. Startup update checks select the matching Windows release channel.
 
@@ -31,7 +31,7 @@ See [Windows installation, source and build instructions](docs/WINDOWS.md). The 
 For **Ubuntu 24.04+ / Debian 13+** with Python 3.12 or newer:
 
 ```sh
-sudo apt install ./serial-desk_1.3.0_all.deb
+sudo apt install ./serial-desk_1.3.1_all.deb
 serial-desk
 ```
 
