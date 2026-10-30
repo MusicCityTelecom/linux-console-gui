@@ -3,6 +3,7 @@ import json
 import os
 import time
 from pathlib import Path
+from platform_support import config_directory
 import serial
 from serial.tools import list_ports
 
@@ -91,11 +92,11 @@ def validate_settings(raw):
 
 class ProfileStore:
     def __init__(self, path=None, load=True):
-        self.path = Path(path) if path else Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'serial-desk' / 'profiles.json'
+        self.path = Path(path) if path else config_directory() / 'profiles.json'
         self.profiles = {}
         self.last = dict(DEFAULTS)
         if load and self.path.exists():
-            raw = json.loads(self.path.read_text())
+            raw = json.loads(self.path.read_text(encoding='utf-8'))
             if not isinstance(raw, dict) or not isinstance(raw.get('profiles', {}), dict):
                 raise ValueError('Invalid profile file')
             self.profiles = {name: validate_settings(value) for name, value in raw.get('profiles', {}).items()}

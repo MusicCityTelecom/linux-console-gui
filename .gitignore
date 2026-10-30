@@ -6,3 +6,6 @@ INSTALL_MODE
 *.jsonl
 *.log
 preview*.png
+build-windows/
+dist-windows/
+*.spec

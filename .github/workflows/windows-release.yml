@@ -1,0 +1,51 @@
+name: Windows release
+on:
+  push:
+    branches: [main]
+    paths: [version.py, .github/workflows/windows-release.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-windows.txt
+      - run: python -m pip install -r requirements-windows.txt "pyinstaller>=6,<7"
+      - name: Test shared application and Windows adapters
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest -v
+      - name: Locate or install Inno Setup
+        shell: pwsh
+        run: |
+          $Compiler = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $Compiler) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Could not install Inno Setup.' }
+            $Compiler = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe" | Select-Object -First 1
+          }
+          if (-not $Compiler) { throw 'Inno Setup compiler was not found.' }
+          "ISCC=$($Compiler.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build and smoke-test Windows executable
+        run: python scripts/build-windows.py
+      - name: Publish separate Windows release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $Version = python -c "from version import VERSION; print(VERSION)"
+          $Tag = "windows-v$Version"
+          gh release view $Tag 2>$null
+          if ($LASTEXITCODE -eq 0) { Write-Output "Release $Tag already exists."; exit 0 }
+          $Assets = @(Get-ChildItem dist-windows -File | ForEach-Object { $_.FullName })
+          gh release create $Tag @Assets --target $env:GITHUB_SHA --title "Serial Desk $Version - Windows x64" --notes-file docs/WINDOWS.md --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Windows release publication failed.' }

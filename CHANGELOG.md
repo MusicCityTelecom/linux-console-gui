@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 — 2026-10-30
+
+- Windows 10/11 x64 edition with a per-user installer, portable application ZIP and shared-source ZIP in a separate Windows release.
+- Windows local terminal through pywinpty, native COM-port support and AppData configuration paths.
+- Cross-platform vault file locks; local Windows vault keys additionally protected by Windows DPAPI.
+- Platform-specific update channels and Windows installer/source update handling.
+- Windows-native CI tests, bundled GUI/terminal smoke test, packaging scripts and source installation instructions.
+- Cross-platform TLS test certificates and UTF-8 notes support.
+
 ## 1.1.0 — 2026-10-30
 
 - Multiple independent, movable and closable serial, network, file-browser and local-terminal tabs; new-session menu, tab renaming and duplication.

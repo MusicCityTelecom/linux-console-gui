@@ -1,7 +1,8 @@
 import json
 import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-import pty
+if os.name != 'nt':
+    import pty
 import tempfile
 import time
 import unittest
@@ -33,7 +34,7 @@ class SerialDeskTests(unittest.TestCase):
             loaded = ProfileStore(path)
             self.assertEqual(loaded.profiles, store.profiles)
             self.assertEqual(loaded.last['parity'], 'E')
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name!='nt': self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_invalid_profile_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
@@ -69,6 +70,7 @@ class SerialDeskTests(unittest.TestCase):
         QTest.keyClick(t, Qt.Key_C, Qt.ControlModifier)
         self.assertEqual(sent, [b'\x03'])
 
+    @unittest.skipIf(os.name=='nt','POSIX serial pseudo-terminal integration test')
     def test_real_pseudo_terminal_rx_tx_log_disconnect(self):
         with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, XDG_CONFIG_HOME=d):
             master, slave = pty.openpty()

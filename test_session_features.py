@@ -26,7 +26,8 @@ class VaultTests(unittest.TestCase):
     def test_master_password_wrong_password_and_change(self):
         with tempfile.TemporaryDirectory() as d:
             v=CredentialVault(d); v.save_profile('router',dict(password='SECRET_LOGIN',key_data='SECRET_KEY'))
-            self.assertNotIn('SECRET',v.path.read_text()); self.assertEqual(v.path.stat().st_mode&0o777,0o600)
+            self.assertNotIn('SECRET',v.path.read_text())
+            if os.name!='nt': self.assertEqual(v.path.stat().st_mode&0o777,0o600)
             v.set_master_password('old-password'); self.assertFalse(v.local_key_path.exists())
             other=CredentialVault(d); self.assertTrue(other.locked)
             with self.assertRaises(VaultError): other.unlock('incorrect')
@@ -88,7 +89,7 @@ class LocalSSHServer:
             lstat=stat
             def open(self,path,flags,attr):
                 try:
-                    fd=os.open(self.local(path),flags,0o600); mode='r+b' if flags&os.O_RDWR else 'wb' if flags&os.O_WRONLY else 'rb'
+                    fd=os.open(self.local(path),flags|getattr(os,'O_BINARY',0),0o600); mode='r+b' if flags&os.O_RDWR else 'wb' if flags&os.O_WRONLY else 'rb'
                     f=os.fdopen(fd,mode);handle=paramiko.SFTPHandle(flags);handle.readfile=f;handle.writefile=f;return handle
                 except OSError as e:return paramiko.SFTPServer.convert_errno(e.errno or 2)
         class Server(paramiko.ServerInterface):

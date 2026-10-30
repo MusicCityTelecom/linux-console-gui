@@ -1,6 +1,6 @@
 # Serial Desk
 
-A native Linux desktop toolkit for serial consoles, network maintenance and file transfers. Built with Python and Qt. Licensed under MIT.
+A native Linux and Windows desktop toolkit for serial consoles, network maintenance and file transfers. Built with Python and Qt. Licensed under MIT.
 
 ## Features
 
@@ -16,12 +16,18 @@ A native Linux desktop toolkit for serial consoles, network maintenance and file
 
 The terminal handles basic cursor/erase sequences and UTF-8 text. It is a maintenance console, not a full VT100 emulator: ANSI colors and full-screen editors are not supported. Use a dedicated terminal emulator for those applications.
 
+## Windows version
+
+Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.2.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
+
+See [Windows installation, source and build instructions](docs/WINDOWS.md). The Windows local terminal runs Command Prompt, COM ports use Windows names, and local credential keys use Windows DPAPI. Startup update checks select the matching Windows release channel.
+
 ## Install the Debian package
 
 For **Ubuntu 24.04+ / Debian 13+** with Python 3.12 or newer:
 
 ```sh
-sudo apt install ./serial-desk_1.1.0_all.deb
+sudo apt install ./serial-desk_1.2.0_all.deb
 serial-desk
 ```
 
@@ -90,9 +96,9 @@ python3 scripts/build-release.py
 
 Output in `dist/`: `.deb`, source `.tar.gz`, and `SHA256SUMS`. The builder uses an explicit file list, excluding profiles, logs, notes, reference binaries and local configuration.
 
-Tests exercise serial loopback and Linux pseudo-terminal RX/TX/unplug handling; Telnet negotiation and a real loopback server; TLS Telnet with a local certificate; a local SSH server and fingerprint trust; a local shell; real SFTP and SCP upload/download on a shared SSH connection; encrypted-vault integrity, master-password and profile auto-connect checks; notes; small-screen sizing; and update version, checksum and archive-path validation. Physical serial devices, real Mitel controllers and external file servers still require equipment-specific validation.
+Tests run on Linux and Windows and exercise serial loopback and Linux pseudo-terminal RX/TX/unplug handling; Telnet negotiation and a real loopback server; TLS Telnet with a local certificate; a local SSH server and fingerprint trust; a local shell; real SFTP and SCP upload/download on a shared SSH connection; encrypted-vault integrity, master-password and profile auto-connect checks; notes; small-screen sizing; and update version, checksum and archive-path validation. Windows-specific tests cover DPAPI and the actual Windows pseudo-terminal; POSIX-only tests are skipped on Windows. Physical serial devices, real Mitel controllers and external file servers still require equipment-specific validation.
 
-GitHub Actions runs tests on pushes and pull requests. Changing `version.py` on `main` publishes a matching GitHub release, with installers and checksums, after tests pass. Releases are immutable through the workflow: increment the version for subsequent changes.
+GitHub Actions runs Linux tests on pushes and pull requests; Windows tests and bundled-executable smoke checks run in the Windows release workflow. Changing `version.py` on `main` publishes a matching GitHub release, with Linux installers and checksums, after tests pass. A separate Windows workflow builds the installer, portable archive and Windows source ZIP and publishes `windows-v<version>` without replacing the Linux latest-release marker. Releases are immutable through the workflow: increment the version for subsequent changes.
 
 ## Remove
 

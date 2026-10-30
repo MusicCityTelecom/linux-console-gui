@@ -399,26 +399,26 @@ class Notepad(QWidget):
         super().__init__(); layout=QVBoxLayout(self); row=QHBoxLayout(); layout.addLayout(row)
         button('Open…',self.open_file,row); button('Save copy…',self.save_file,row); row.addStretch()
         label=QLabel('Scratchpad • saved locally as you type'); row.addWidget(label)
-        self.text=QPlainTextEdit(); self.text.setReadOnly(False); self.text.setFont(QFont('DejaVu Sans Mono',11)); layout.addWidget(self.text)
+        self.text=QPlainTextEdit(); self.text.setReadOnly(False); self.text.setFont(QFont('Consolas' if os.name=='nt' else 'DejaVu Sans Mono',11)); layout.addWidget(self.text)
         self.path=CONFIG/'notes.txt'; self.timer=QTimer(self); self.timer.setSingleShot(True); self.timer.timeout.connect(self.persist)
         try:
-            if self.path.exists(): self.text.setPlainText(self.path.read_text())
+            if self.path.exists(): self.text.setPlainText(self.path.read_text(encoding='utf-8'))
         except OSError as e: label.setText(str(e))
         self.text.textChanged.connect(lambda:self.timer.start(700))
     def persist(self):
         try:
             self.path.parent.mkdir(parents=True,exist_ok=True)
-            tmp=self.path.with_suffix('.tmp'); tmp.write_text(self.text.toPlainText()); tmp.chmod(0o600); tmp.replace(self.path)
+            tmp=self.path.with_suffix('.tmp'); tmp.write_text(self.text.toPlainText(),encoding='utf-8'); tmp.chmod(0o600); tmp.replace(self.path)
         except OSError as e: QMessageBox.warning(self,'Notes could not be saved',str(e))
     def open_file(self):
         path,_=QFileDialog.getOpenFileName(self,'Open notes')
         if path:
             if self.text.toPlainText() and QMessageBox.question(self,'Replace scratchpad','Replace current notes? Save a copy first if needed.') != QMessageBox.Yes: return
-            try: self.text.setPlainText(Path(path).read_text())
+            try: self.text.setPlainText(Path(path).read_text(encoding='utf-8'))
             except (OSError,UnicodeError) as e: QMessageBox.warning(self,'Notes',str(e))
     def save_file(self):
         path,_=QFileDialog.getSaveFileName(self,'Save notes copy',str(Path.home()/'notes.txt'))
         if path:
-            try: Path(path).write_text(self.text.toPlainText())
+            try: Path(path).write_text(self.text.toPlainText(),encoding='utf-8')
             except OSError as e: QMessageBox.warning(self,'Notes',str(e))
     def shutdown(self): self.timer.stop(); self.persist()

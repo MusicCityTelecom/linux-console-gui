@@ -102,7 +102,7 @@ class SecurityMenu:
         if not self.vault.master_enabled: return
         password=self.current_password()
         if password is None: return
-        if QMessageBox.question(self.window,'Remove master password','Use a local account-protected key instead? Anyone with access to your Linux account can then unlock saved credentials.') != QMessageBox.Yes: return
+        if QMessageBox.question(self.window,'Remove master password','Use a local account-protected key instead? Anyone with access to your operating-system account can then unlock saved credentials.') != QMessageBox.Yes: return
         try: self.vault.remove_master_password(password)
         except (VaultError,OSError) as e: QMessageBox.warning(self.window,'Master password',str(e))
     def explain(self):

@@ -11,10 +11,11 @@ import subprocess
 import threading
 import queue
 from pathlib import Path
+from platform_support import config_directory
 import paramiko
 from PyQt5.QtCore import QThread, pyqtSignal
 
-CONFIG = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'serial-desk'
+CONFIG = config_directory()
 
 
 class TelnetCodec:
@@ -153,10 +154,13 @@ class Session(QThread):
     def send(self, data): self.output.put_nowait(data)
     def stop(self): self.requestInterruption(); self.event.set()
     def run(self):
-        s = self.settings; sock = client = channel = process = None; master = None
+        s = self.settings; sock = client = channel = process = None; master = None; winproc = None
         try:
             protocol = s['protocol']; codec = TelnetCodec()
-            if protocol == 'Local terminal':
+            if protocol == 'Local terminal' and os.name=='nt':
+                from winpty import PtyProcess
+                winproc=PtyProcess.spawn([os.environ.get('COMSPEC','cmd.exe'),'/Q'],cwd=str(Path.home()),dimensions=(40,120))
+            elif protocol == 'Local terminal':
                 import pty, fcntl, termios
                 master, slave = pty.openpty()
                 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
@@ -188,14 +192,21 @@ class Session(QThread):
                 try: data = self.output.get_nowait()
                 except queue.Empty: data = None
                 if data:
-                    if master is not None:
+                    if winproc is not None:
+                        winproc.write(data.decode('utf-8',errors='replace').replace('\x7f','\b'))
+                    elif master is not None:
                         view = memoryview(data)
                         while view: view = view[os.write(master, view):]
                     elif channel: channel.sendall(data)
                     else: sock.sendall(codec.encode(data))
                     self.sent.emit(data)
                 chunk = None
-                if master is not None:
+                if winproc is not None:
+                    if select.select([winproc],[],[],.03)[0]:
+                        try: chunk=winproc.read(32768).encode('utf-8')
+                        except EOFError: break
+                    elif not winproc.isalive(): break
+                elif master is not None:
                     if select.select([master], [], [], .03)[0]:
                         try: chunk = os.read(master, 32768)
                         except OSError: break
@@ -225,6 +236,9 @@ class Session(QThread):
             if self.ssh_handle:
                 self.ssh_handle.release(); self.ssh_handle=None
             elif client: client.close()
+            if winproc is not None:
+                try: winproc.close(force=True)
+                except OSError: pass
             if master is not None: os.close(master)
             if process and process.poll() is None:
                 import signal

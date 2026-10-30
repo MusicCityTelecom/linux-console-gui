@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from platform_support import config_directory,exclusive_file_lock,protect_local_key,unprotect_local_key
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -20,7 +21,7 @@ def unb64(data): return base64.b64decode(data, validate=True)
 
 class CredentialVault:
     def __init__(self, directory=None):
-        self.directory = Path(directory) if directory else Path(os.environ.get('XDG_CONFIG_HOME', Path.home()/'.config'))/'serial-desk'
+        self.directory = Path(directory) if directory else config_directory()
         self.path = self.directory/'credentials.vault'
         self.local_key_path = self.directory/'credentials.key'
         self._key = None; self._salt = b''; self._mode = 'local'; self._data = None; self._revision = None
@@ -63,8 +64,8 @@ class CredentialVault:
             if not create: raise VaultError('The local credential key is missing. Restore credentials.key from your backup.')
             self.directory.mkdir(parents=True,exist_ok=True); self.directory.chmod(0o700)
             fd = os.open(self.local_key_path, os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-            with os.fdopen(fd,'wb') as f: f.write(os.urandom(32)); f.flush(); os.fsync(f.fileno())
-        key = self.local_key_path.read_bytes()
+            with os.fdopen(fd,'wb') as f: f.write(protect_local_key(os.urandom(32))); f.flush(); os.fsync(f.fileno())
+        key = unprotect_local_key(self.local_key_path.read_bytes())
         if len(key)!=32: raise VaultError('Invalid local credential key.')
         return key
 
@@ -90,11 +91,7 @@ class CredentialVault:
         mode=mode or self._mode; salt=salt or self._salt or os.urandom(16)
         key=key or self._key or self._local_key(create=True)
         self.directory.mkdir(parents=True,exist_ok=True); self.directory.chmod(0o700)
-        import fcntl
-        lock_path=self.directory/'credentials.lock'
-        lock_fd=os.open(lock_path,os.O_RDWR|os.O_CREAT,0o600)
-        with os.fdopen(lock_fd,'a') as lock:
-            fcntl.flock(lock,fcntl.LOCK_EX)
+        with exclusive_file_lock(self.directory/'credentials.lock'):
             current=hashlib.sha256(self.path.read_bytes()).digest() if self.path.exists() else None
             if current != self._revision: raise VaultError('Credentials changed in another app window. Reopen this window before saving.')
             nonce=os.urandom(12)

@@ -62,7 +62,19 @@ class NetworkTests(unittest.TestCase):
     def test_tls_telnet_connection(self):
         with tempfile.TemporaryDirectory() as d:
             cert=Path(d)/'cert.pem'; key=Path(d)/'key.pem'
-            subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-keyout',str(key),'-out',str(cert),'-days','1','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost'],check=True,capture_output=True)
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID
+            from cryptography.hazmat.primitives import hashes,serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            from datetime import datetime,timedelta,timezone
+            private=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+            name=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,'localhost')])
+            certificate=(x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(private.public_key()).serial_number(x509.random_serial_number())
+                .not_valid_before(datetime.now(timezone.utc)-timedelta(minutes=1)).not_valid_after(datetime.now(timezone.utc)+timedelta(days=1))
+                .add_extension(x509.SubjectAlternativeName([x509.DNSName('localhost')]),critical=False)
+                .add_extension(x509.BasicConstraints(ca=True,path_length=None),critical=True).sign(private,hashes.SHA256()))
+            key.write_bytes(private.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.TraditionalOpenSSL,serialization.NoEncryption()))
+            cert.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
             ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); ctx.load_cert_chain(cert,key)
             listener=socket.socket(); listener.bind(('127.0.0.1',0)); listener.listen()
             def serve():
@@ -74,6 +86,7 @@ class NetworkTests(unittest.TestCase):
             received=[]; errors=[]; w.received.connect(received.append); w.failed.connect(errors.append); w.start()
             self.assertTrue(pump_until(lambda:b'TLS controller' in b''.join(received))); w.stop(); self.assertTrue(w.wait(3000)); self.assertFalse(errors)
 
+    @unittest.skipIf(os.name=='nt','Windows shell has its own ConPTY test')
     def test_local_shell_and_interrupt(self):
         w=Session(dict(protocol='Local terminal')); data=[]; errors=[]
         w.received.connect(data.append); w.failed.connect(errors.append); w.start()
@@ -154,8 +167,8 @@ class NetworkTests(unittest.TestCase):
 
     def test_notepad_persistence(self):
         with tempfile.TemporaryDirectory() as d, patch('network_ui.CONFIG',Path(d)):
-            w=Notepad(); w.text.setPlainText('site notes'); w.shutdown()
-            other=Notepad(); self.assertEqual(other.text.toPlainText(),'site notes'); other.shutdown()
+            w=Notepad(); w.text.setPlainText('site notes • 東京'); w.shutdown()
+            other=Notepad(); self.assertEqual(other.text.toPlainText(),'site notes • 東京'); other.shutdown()
 
     def test_responsive_window(self):
         from console_gui import Window

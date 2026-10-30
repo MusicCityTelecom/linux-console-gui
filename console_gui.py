@@ -25,7 +25,7 @@ class Terminal(QPlainTextEdit):
     def __init__(self):
         super().__init__()
         self.setReadOnly(True)
-        self.setFont(QFont('DejaVu Sans Mono', 11))
+        self.setFont(QFont('Consolas' if sys.platform=='win32' else 'DejaVu Sans Mono', 11))
         self.setMaximumBlockCount(12000)
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.setPlaceholderText('Connect a device to begin.\n\nType directly here for an interactive console, or use the send bar below.\nCtrl+Shift+C copies selected text. Ctrl+Shift+V pastes to the device.')
@@ -475,7 +475,7 @@ class SerialConsole(QWidget):
 
 
 class Window(QMainWindow):
-    def __init__(self,vault=None):
+    def __init__(self,vault=None,check_updates=True):
         super().__init__()
         self.vault=vault or CredentialVault()
         if self.vault.locked: raise VaultError('Unlock Serial Desk before opening the main window.')
@@ -506,7 +506,7 @@ class Window(QMainWindow):
         view.addAction('Show / hide serial settings',self.toggle_sidebar,'Ctrl+B')
         view.addAction('Larger console text',lambda:self.zoom_console(1),'Ctrl++')
         view.addAction('Smaller console text',lambda:self.zoom_console(-1),'Ctrl+-')
-        self.security=SecurityMenu(self,self.vault); self.updates=UpdateController(self); self.apply_style()
+        self.security=SecurityMenu(self,self.vault); self.updates=UpdateController(self,startup=check_updates); self.apply_style()
     def widgets(self): return [self.tabs.widget(i) for i in range(self.tabs.count())]
     def add_tab(self,widget,title):
         index=self.tabs.addTab(widget,title); self.tabs.setCurrentIndex(index)
@@ -599,6 +599,28 @@ class Window(QMainWindow):
         ''')
 
 
+def run_smoke_test(app,window,report):
+    """Exercise the bundled GUI and platform terminal on a CI machine."""
+    import time
+    started=time.monotonic(); received=[]; finished=[False]
+    timer=QTimer(window)
+    def finish(error=''):
+        if finished[0]: return
+        finished[0]=True;timer.stop()
+        report.write_text(json.dumps(dict(version=VERSION,tabs=window.tabs.count(),local_terminal=not bool(error),error=error)))
+        window.close();app.quit()
+    def begin():
+        window.local.toggle()
+        worker=window.local.worker
+        worker.failed.disconnect();worker.failed.connect(finish);worker.received.connect(received.append)
+        command=b'echo SERIAL_DESK_BUNDLE_OK\r' if sys.platform=='win32' else b"printf 'SERIAL_DESK_BUNDLE_OK\\n'\r"
+        worker.send(command);timer.start(50)
+    def tick():
+        if b'\r\nSERIAL_DESK_BUNDLE_OK\r\n' in b''.join(received): finish()
+        elif time.monotonic()-started>20: finish('Local terminal did not produce the expected response')
+    timer.timeout.connect(tick);QTimer.singleShot(0,begin)
+
+
 def main():
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
@@ -607,7 +629,9 @@ def main():
     try:
         vault=CredentialVault()
         if not unlock_vault(vault): return
-        window=Window(vault); window.show()
+        window=Window(vault,check_updates='--smoke-test' not in sys.argv); window.show()
+        if '--smoke-test' in sys.argv:
+            run_smoke_test(app,window,Path(sys.argv[sys.argv.index('--smoke-test')+1]))
     except (VaultError,OSError) as e:
         QMessageBox.critical(None,'Serial Desk could not open',str(e)); return
     sys.exit(app.exec_())
