@@ -24,7 +24,7 @@ def button(text, callback, layout):
 
 class Credentials(QWidget):
     def __init__(self, protocols):
-        super().__init__(); form=QFormLayout(self);self.form=form;form.setRowWrapPolicy(QFormLayout.WrapAllRows)
+        super().__init__();self.credential_ref=''; form=QFormLayout(self);self.form=form;form.setRowWrapPolicy(QFormLayout.WrapAllRows)
         self.protocol=QComboBox();self.protocol.addItems(protocols);form.addRow('Connection type',self.protocol)
         self.host=QLineEdit();self.host.setPlaceholderText('Hostname or IP address');form.addRow('Remote host',self.host)
         self.port=QLineEdit();self.port.setMaximumWidth(100);form.addRow('Port',self.port)
@@ -47,6 +47,7 @@ class Credentials(QWidget):
         self.remote_path=QLineEdit('.');self.remote_path.setPlaceholderText('Remote starting folder');form.addRow('Remote starting folder',self.remote_path)
         self.notice=QLabel();self.notice.setWordWrap(True);form.addRow(self.notice)
         self.protocol.currentTextChanged.connect(self.changed);self.file_protocol.currentTextChanged.connect(self.file_changed)
+        for field in (self.user,self.password,self.passphrase,self.key):field.textEdited.connect(self.unlink_credential)
         self.port.textChanged.connect(self.sync_file_port);self.changed()
     def row_visible(self,widget,visible):
         widget.setVisible(visible)
@@ -54,7 +55,11 @@ class Credentials(QWidget):
         if label:label.setVisible(visible)
     def changed(self):
         from device_profiles import DEFAULT_PORTS
-        p=self.protocol.currentText();self.port.setText(str(DEFAULT_PORTS.get(p,22)))
+        p=self.protocol.currentText();previous=getattr(self,'previous_protocol',None)
+        if previous and previous!=p and not ({previous,p}<={'SSH','SFTP','SCP'} or {previous,p}<={'FTP','FTPS'}):
+            for field in (self.user,self.password,self.passphrase,self.key):field.clear()
+            self.key_data='';self.credential_ref=''
+        self.previous_protocol=p;self.port.setText(str(DEFAULT_PORTS.get(p,22)))
         local=p=='Local terminal';auth=p in ('SSH','SFTP','SCP','FTP','FTPS');ssh=p in ('SSH','SFTP','SCP');tls=p in ('Mitel TLS Telnet','FTPS')
         for w in (self.host,self.port):self.row_visible(w,not local)
         for w in (self.user,self.password,self.show_password):self.row_visible(w,auth)
@@ -79,16 +84,17 @@ class Credentials(QWidget):
         if p!='Local terminal' and not self.host.text().strip():raise ValueError('Enter a remote host.')
         port=int(self.port.text())
         if not 1<=port<=65535:raise ValueError('Port must be between 1 and 65535.')
-        result=dict(protocol=p,host=self.host.text().strip(),port=port,user=self.user.text().strip(),password=self.password.text(),passphrase=self.passphrase.text(),key=self.key.text().strip(),key_data=self.key_data,ca=self.ca.text().strip(),unverified=self.unverified.isChecked(),legacy=self.legacy.isChecked(),remote_path=self.remote_path.text().strip() or '.')
+        result=dict(protocol=p,host=self.host.text().strip(),port=port,user=self.user.text().strip(),password=self.password.text(),passphrase=self.passphrase.text(),key=self.key.text().strip(),key_data=self.key_data,credential_ref=self.credential_ref if p in ('SSH','SFTP','SCP','FTP','FTPS') else '',ca=self.ca.text().strip(),unverified=self.unverified.isChecked(),legacy=self.legacy.isChecked(),remote_path=self.remote_path.text().strip() or '.')
         if p not in ('SSH','SFTP','SCP','FTP','FTPS'):result.update(user='',password='')
         if p not in ('SSH','SFTP','SCP') or not self.key_group.isChecked():result.update(passphrase='',key='',key_data='')
         if p not in ('Mitel TLS Telnet','FTPS'):result.update(ca='',unverified=False)
         if p=='SSH':result.update(open_files=self.open_files.isChecked(),file_protocol=self.file_protocol.currentText(),file_port=self.file_port.value())
         return result
     def clear_stored_key(self,*args):self.key_data=''
+    def unlink_credential(self,*args):self.credential_ref=''
     def choose_key(self):
         path,_=QFileDialog.getOpenFileName(self,'Choose SSH private key',str(Path.home()/'.ssh'))
-        if path:self.key.setText(path);self.key_data='';self.key_group.setChecked(True)
+        if path:self.key.setText(path);self.key_data='';self.credential_ref='';self.key_group.setChecked(True)
     def apply(self,s):
         self.protocol.setCurrentText(s.get('protocol','SSH'))
         for name in ('host','port','user','key','ca','password','passphrase'):getattr(self,name).setText(str(s.get(name,'')))
@@ -96,6 +102,7 @@ class Credentials(QWidget):
         for name in ('unverified','legacy','open_files'):getattr(self,name).setChecked(bool(s.get(name,False)))
         self.file_protocol.setCurrentText(s.get('file_protocol','SFTP'));self.file_port.setValue(int(s.get('file_port',s.get('port',22))))
         self.remote_path.setText(s.get('remote_path','.'));self.show_password.setChecked(False)
+        self.credential_ref=s.get('credential_ref','')
     def confirm_tls(self,s):
         if s['protocol'] not in ('Mitel TLS Telnet','FTPS') or not (s['unverified'] or s['legacy']):return True
         return QMessageBox.question(self,'TLS compatibility','This connection uses reduced TLS verification or legacy cryptography. Continue for this device?')==QMessageBox.Yes
@@ -151,8 +158,10 @@ class NetworkConsole(QWidget):
             self.browse_requested.emit(self,protocol)
     def set_state(self,text):
         self.state.setText(text);self.terminal.set_session_active(text=='Connected');self.update_focus_hint()
+        skip=getattr(self,'skip_companion_once',False)
+        if text=='Connected':self.skip_companion_once=False
         if text=='Connected' and self.credentials.protocol.currentText()=='SSH' and (self.last_settings or {}).get('open_files'):
-            self.companion_requested.emit(self,self.last_settings.get('file_protocol','SFTP'))
+            if not skip:self.companion_requested.emit(self,self.last_settings.get('file_protocol','SFTP'))
         active=text=='Connected' and self.credentials.protocol.currentText()=='SSH'
         self.sftp_button.setEnabled(active); self.scp_button.setEnabled(active)
     def update_focus_hint(self,*args):
@@ -161,18 +170,22 @@ class NetworkConsole(QWidget):
     def toggle(self):
         if self.worker and self.worker.isRunning(): self.worker.stop(); self.connect_button.setEnabled(False); return
         try: s = self.credentials.values()
-        except ValueError as e: QMessageBox.warning(self,'Settings',str(e)); return
+        except ValueError as e: self.connection_error(str(e)); return
+        s=self.vault.resolve_login(s)
         if not self.credentials.confirm_tls(s): return
         self.last_settings={k:v for k,v in s.items() if k not in ('password','passphrase','key_data')}
         self.title_changed.emit(s.get('host') or 'Local terminal')
         self.worker = Session(s, self)
         self.worker.received.connect(self.receive); self.worker.sent.connect(lambda data: self.record('TX',data))
         self.worker.state.connect(self.set_state)
-        self.worker.failed.connect(lambda msg: QMessageBox.warning(self,'Connection',msg))
+        self.worker.failed.connect(self.connection_error)
         self.worker.question.connect(self.trust)
         self.worker.finished.connect(self.finished)
         self.credentials.setEnabled(False); self.profile_bar.setEnabled(False); self.connect_button.setText('Disconnect'); self.state.setText('Connecting…')
         self.decoder.reset(); self.worker.start(); self.terminal.setFocus(); self.credentials.password.clear(); self.credentials.passphrase.clear(); self.credentials.key_data=''
+    def connection_error(self,message):
+        if getattr(self,'quiet_errors',False):self.terminal.feed('\r\n[Connection failed] '+message+'\r\n');self.focus_hint.setText(message)
+        else:QMessageBox.warning(self,'Connection',message)
     def trust(self,title,text): self.worker.respond(QMessageBox.question(self,title,text) == QMessageBox.Yes)
     def finished(self):
         self.credentials.setEnabled(True); self.profile_bar.setEnabled(True); self.connect_button.setEnabled(True); self.connect_button.setText('Connect')
@@ -272,13 +285,17 @@ class FileBrowser(QWidget):
         self.set_busy(False)
         if error:
             self.status.setText(error)
-            if 'cancelled' not in error.lower():QMessageBox.warning(self,'File transfer',error)
+            if 'cancelled' not in error.lower() and not getattr(self,'quiet_errors',False):QMessageBox.warning(self,'File transfer',error)
         else: callback(result)
     def connect_remote(self):
         if self.remote:
             self.close_remote(); return
         try: s = self.credentials.values()
-        except ValueError as e: QMessageBox.warning(self,'Settings',str(e)); return
+        except ValueError as e:
+            self.status.setText(str(e))
+            if not getattr(self,'quiet_errors',False):QMessageBox.warning(self,'Settings',str(e))
+            return
+        s=self.vault.resolve_login(s)
         if not self.credentials.confirm_tls(s): return
         def connect(task):
             if s['protocol'] in ('SFTP','SCP'):

@@ -23,7 +23,7 @@ def for_context(profile,protocols,current=None):
         result['port']=int(profile.get('file_port',profile.get('port',22)) if protocol in SSH_FAMILY and configured in SSH_FAMILY else profile.get('file_port',DEFAULT_PORTS[protocol]) if protocol==configured else DEFAULT_PORTS[protocol])
         result['auto_connect']=profile.get('file_auto_connect',profile.get('auto_connect',False) if protocol in SSH_FAMILY else False)
         if protocol not in SSH_FAMILY:
-            for key in ('user','password','passphrase','key','key_data'):result[key]=''
+            for key in ('user','password','passphrase','key','key_data','credential_ref'):result[key]=''
             result.update(profile.get('file_login',{}));result['remember']=profile.get('file_remember',False)
     elif 'SSH' in protocols and (source in SSH_FAMILY or profile.get('ssh_enabled')):
         result['protocol']='SSH';result['port']=int(profile.get('ssh_port',profile.get('port',22) if source in SSH_FAMILY else 22))
@@ -38,7 +38,7 @@ def merge_profile(previous,settings):
         for key in ('host','group'):
             if key in settings:merged[key]=settings[key]
         merged.update(file_protocol=protocol,file_port=int(settings['port']),file_auto_connect=settings.get('auto_connect',False),file_remember=settings.get('remember',False),remote_path=settings.get('remote_path','.'))
-        merged['file_login']={k:settings[k] for k in ('user','password','ca','unverified') if k in settings} if protocol!='TFTP' else {}
+        merged['file_login']={k:settings[k] for k in ('user','password','credential_ref','ca','unverified') if k in settings} if protocol!='TFTP' else {}
         return merged
     merged=dict(previous);merged.update(settings)
     if protocol=='SSH':

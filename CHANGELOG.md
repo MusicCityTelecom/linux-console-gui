@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0
+
+- Encrypted workspace snapshots retain tab order/names, selected tab, serial/network/file settings, remote folders and window geometry. Startup asks before restoration by default; ask/always/never policies and separate optional reconnection are configurable. Master unlock precedes restoration. Commands, unsaved secrets, logs and transfers are not replayed.
+- SSH-linked SFTP/SCP tabs can restore on the same authenticated SSH transport. Restored companions are reused after a manual reconnect. Failed startup connections report errors within their tabs.
+- Offline, searchable F1 command reference for Linux, Windows CMD/PowerShell, macOS, Cisco IOS/XE, ArubaOS-Switch, AOS-CX, Comware, ADTRAN AOS, Junos and RouterOS. Copy or insert for review without execution.
+- Optional encrypted password manager with manual entries, private-key copies, encrypted notes, a password generator, guarded 30-second clipboard clearing and centrally linked device logins.
+- Reviewed imports for PuTTY registry exports, Tera Term INI hosts, MobaXterm SSH/FTP/SFTP bookmarks, Termius/OpenSSH configuration, generic session CSV/JSON, and compatible browser password CSVs. Per-entry selection, masked secrets, duplicate policies and atomic saves; protected/missing/unsupported source data is flagged.
+- SSH and separate FTP credential references remain isolated. Switching unrelated protocol families clears stale login fields.
+- Added 21 automated tests, including real upload/download through a restored shared SSH connection. Updated Linux/Windows installers and source packages.
+
 ## 1.3.1 — 2026-10-30
 
 - Treat a Windows UDP peer-close notification after the final TFTP data/ACK as a completed download, preserving correct successful-transfer handling.

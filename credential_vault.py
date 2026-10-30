@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 import tempfile
+import uuid
+import re
 from pathlib import Path
 from platform_support import config_directory,exclusive_file_lock,protect_local_key,unprotect_local_key
 from cryptography.exceptions import InvalidTag
@@ -17,6 +19,7 @@ class VaultError(Exception):
 
 def b64(data): return base64.b64encode(data).decode('ascii')
 def unb64(data): return base64.b64decode(data, validate=True)
+def display_url(value):return re.sub(r'(?<=://)[^/]*@','[hidden]@',value)
 
 
 class CredentialVault:
@@ -42,6 +45,62 @@ class CredentialVault:
         if self.locked: raise VaultError('Unlock the credential vault first.')
         # Return copies: callers cannot accidentally mutate decrypted credentials.
         return json.loads(json.dumps(self._data['profiles']))
+
+    def section(self,name,default=None):
+        if self.locked: raise VaultError('Unlock the credential vault first.')
+        return json.loads(json.dumps(self._data.get(name,default)))
+
+    def save_section(self,name,value):
+        if name not in ('workspace','workspace_options','passwords'): raise VaultError('Unknown vault section.')
+        if self.locked: raise VaultError('Unlock the credential vault first.')
+        data=json.loads(json.dumps(self._data));data[name]=value;self._write(data)
+
+    @property
+    def passwords(self): return self.section('passwords',{})
+
+    def save_password(self,entry,entry_id=None):
+        if not entry.get('name','').strip(): raise VaultError('Give this entry a name.')
+        entries=self.passwords;entry_id=entry_id or uuid.uuid4().hex
+        entries[entry_id]=dict(entry);self.save_section('passwords',entries);return entry_id
+
+    def delete_password(self,entry_id):
+        entries=self.passwords;entries.pop(entry_id,None);self.save_section('passwords',entries)
+
+    def resolve_login(self,settings):
+        """Resolve an explicitly linked vault entry after protocol adaptation."""
+        result=dict(settings);ref=result.get('credential_ref')
+        if ref:
+            entry=self.passwords.get(ref,{})
+            for key in ('user','password','key','key_data','passphrase'):result[key]=entry.get(key,'')
+        return result
+
+    def import_records(self,items,duplicates='rename'):
+        """Commit a reviewed batch atomically; imported sessions never auto-connect."""
+        if self.locked: raise VaultError('Unlock the credential vault first.')
+        if duplicates not in ('rename','skip','replace'):raise VaultError('Unknown duplicate policy.')
+        data=json.loads(json.dumps(self._data));entries=data.setdefault('passwords',{})
+        counts=dict(profiles=0,passwords=0,skipped=0)
+        for item in items:
+            kind=item['kind'];value=dict(item['data']);name=item['name'].strip()
+            if not name:raise VaultError('An imported entry has no name.')
+            if kind=='profile':
+                target=data['profiles'];key=name
+            elif kind=='password':
+                target=entries;key=next((k for k,v in entries.items() if v.get('name')==name and v.get('url','')==value.get('url','') and v.get('user','')==value.get('user','')),None)
+            else:raise VaultError('Unsupported import record type.')
+            collision=key is not None and key in target
+            if collision and duplicates=='skip':counts['skipped']+=1;continue
+            if collision and duplicates=='rename':
+                names=set(target) if kind=='profile' else {v.get('name') for v in target.values()}
+                original=name;n=2
+                while name in names:name=f'{original} (imported {n})';n+=1
+                key=name if kind=='profile' else None
+            if kind=='profile':
+                value.update(auto_connect=False,file_auto_connect=False,open_files=False)
+                target[key or name]=value;counts['profiles']+=1
+            else:
+                value['name']=name;target[key or uuid.uuid4().hex]=value;counts['passwords']+=1
+        self._write(data);return counts
 
     def _parse(self, raw):
         try:

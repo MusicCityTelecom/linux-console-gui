@@ -67,7 +67,7 @@ class ProfileBar(QWidget):
         if not s or not self.credentials.isEnabled(): return
         protocols=[self.credentials.protocol.itemText(i) for i in range(self.credentials.protocol.count())]
         adapted=for_context(s,protocols,self.credentials.protocol.currentText())
-        self.credentials.apply(adapted)
+        self.credentials.apply(self.vault.resolve_login(adapted))
         self.group.setEditText(s.get('group',''))
         self.remember.setChecked(bool(adapted.get('remember',False))); self.store_key.setChecked(bool(adapted.get('key_data')))
         self.auto.setChecked(bool(adapted.get('auto_connect',False)))
@@ -90,6 +90,9 @@ class ProfileBar(QWidget):
                 from network_core import private_key_from_text
                 private_key_from_text(s['key_data'],self.credentials.passphrase.text() or self.credentials.password.text())
             else:s['key_data']=''
+            if s.get('credential_ref'):
+                # Keep one authoritative secret in the password manager.
+                for key in ('password','passphrase','key_data'):s[key]=''
             s=merge_profile(self.vault.profiles.get(name,{}),s)
             self.vault.save_profile(name,s); self.filter_group.setCurrentText('All groups');self.search.clear();self.refresh(); self.combo.setCurrentText(name); self.changed.emit()
         except (ValueError,VaultError,OSError) as e: QMessageBox.warning(self,'Profile could not be saved',str(e))
@@ -104,6 +107,7 @@ class SecurityMenu:
     def __init__(self,window,vault):
         self.window=window; self.vault=vault
         menu=window.menuBar().addMenu('Security')
+        menu.addAction('Password manager…',window.password_manager,'Ctrl+Shift+P')
         menu.addAction('Set / change master password…',self.set_password)
         menu.addAction('Remove master password…',self.remove_password)
         menu.addAction('Credential protection…',self.explain)
@@ -159,14 +163,14 @@ class DeviceManager(QDialog):
         for name,p in sorted(self.vault.profiles.items()):
             if query and query not in (name+' '+p.get('group','')+' '+p.get('host','')).casefold():continue
             row=self.table.rowCount();self.table.insertRow(row)
-            shell='SSH' if compatible(p,['SSH']) else p.get('protocol','') if p.get('protocol') in ('Telnet','Mitel TLS Telnet') else '—'
+            shell='SSH' if compatible(p,['SSH']) else p.get('protocol','') if p.get('protocol') in ('Telnet','Mitel TLS Telnet','Serial') else '—'
             files=p.get('file_protocol',p.get('protocol') if p.get('protocol') in ('SFTP','SCP','FTP','FTPS','TFTP') else 'SFTP' if p.get('protocol')=='SSH' else '—')
             for col,text in enumerate((name,p.get('group','') or 'Ungrouped',p.get('host',''),shell,files)):self.table.setItem(row,col,QTableWidgetItem(text))
             if name==current:self.table.selectRow(row)
         if not self.selected() and self.table.rowCount():self.table.selectRow(0)
         self.update_buttons()
     def update_buttons(self):
-        p=self.vault.profiles.get(self.selected(),{});self.shell.setEnabled(bool(p) and compatible(p,['SSH','Telnet','Mitel TLS Telnet']));self.files.setEnabled(bool(p) and compatible(p,['SFTP','SCP','FTP','FTPS','TFTP']))
+        p=self.vault.profiles.get(self.selected(),{});self.shell.setEnabled(bool(p) and compatible(p,['SSH','Telnet','Mitel TLS Telnet','Serial']));self.files.setEnabled(bool(p) and compatible(p,['SFTP','SCP','FTP','FTPS','TFTP']))
     def launch(self,files):
         name=self.selected()
         if name:self.open_device.emit(name,files);self.accept()

@@ -148,6 +148,11 @@ class UpdateController:
                     command=['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(installer)]
                 else:
                     installer=extract_source(path,self.folder/'source');command=['sh',str(installer)]
+                    prefix_file=application_directory()/'INSTALL_PREFIX'
+                    if prefix_file.exists():
+                        prefix=prefix_file.read_text()
+                        if not Path(prefix).is_absolute():raise ValueError('Invalid source installation prefix.')
+                        command.extend(['--prefix',prefix])
                 result=subprocess.run(command,capture_output=True,text=True,timeout=180)
                 if result.returncode: raise RuntimeError(result.stderr[-3000:] or result.stdout[-3000:])
                 return result.stdout

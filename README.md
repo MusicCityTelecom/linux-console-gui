@@ -4,6 +4,10 @@ A native Linux and Windows desktop toolkit for serial consoles, network maintena
 
 ## Features
 
+- **Saved workspaces:** save tab order, custom names, connection settings, remote folders and window geometry in the encrypted vault. Startup asks before restoration by default. Choose ask/always/never and optional reconnection under **Workspace → Startup / restore settings**. Master-password unlock happens first; commands and transfers are never replayed.
+- **Offline command reference:** **Help → Command reference** or **F1** opens a separate searchable window for Linux, Windows Command Prompt/PowerShell, macOS, Cisco IOS/IOS XE, HP/ArubaOS-Switch, Aruba AOS-CX, HPE/H3C Comware, ADTRAN AOS, Juniper Junos and MikroTik RouterOS. Copy examples or insert them into the active command bar for review, without executing them.
+- **Optional password manager:** **Security → Password manager** (**Ctrl+Shift+P**) stores manually entered logins, encrypted notes and optional private-key copies. Generate passwords, copy passwords with a 30-second clipboard clear, or link an entry to a device profile so its login stays synchronized.
+- **Reviewed imports:** import supported PuTTY, Tera Term, MobaXterm, Termius/OpenSSH, session CSV/JSON and browser password CSV exports from **Devices → Import sessions / passwords**. Preview fields and missing/unsupported secrets, select records, and rename/skip/replace duplicates. [Formats and limitations](docs/IMPORTS.md).
 - **Shared devices and groups:** SSH, SFTP and SCP use the same saved device entries. Group and search filters, atomic device renaming, and **Devices → Saved devices and groups** make large connection lists easier to manage. Shell and file ports are kept separately; editing one view updates the same record in the other.
 - **Companion services:** enable **Open remote files with SSH** and choose SFTP, SCP, FTP, FTPS or TFTP. SFTP/SCP on the same port reuse the authenticated SSH connection. Separate FTP/FTPS logins are stored separately from SSH; without a saved file-service login the tab asks you to enter one. Automatic companion tabs keep the console selected.
 - **Visible console focus:** blinking block/bar cursor at the remote insertion point, mint focus borders, keyboard-focus hints and configurable interface/console fonts, blink and scrollback under **Settings → Console appearance**.
@@ -22,7 +26,7 @@ The terminal handles basic cursor/erase sequences and UTF-8 text. It is a mainte
 
 ## Windows version
 
-Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.3.1). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
+Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.4.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
 
 See [Windows installation, source and build instructions](docs/WINDOWS.md). The Windows local terminal runs Command Prompt, COM ports use Windows names, and local credential keys use Windows DPAPI. Startup update checks select the matching Windows release channel.
 
@@ -31,7 +35,7 @@ See [Windows installation, source and build instructions](docs/WINDOWS.md). The 
 For **Ubuntu 24.04+ / Debian 13+** with Python 3.12 or newer:
 
 ```sh
-sudo apt install ./serial-desk_1.3.1_all.deb
+sudo apt install ./serial-desk_1.4.0_all.deb
 serial-desk
 ```
 
@@ -49,6 +53,8 @@ sh install-source.sh
 ```
 
 The source installer does not require root. It installs a versioned copy under `$XDG_DATA_HOME/serial-desk` (default `~/.local/share/serial-desk`) and a launcher in `~/.local/bin`. Previous versions are retained. Updates from source use the same installer. The source tree can also be run directly with `python3 console_gui.py` after dependencies are installed. `requirements.txt` is provided for virtual environments; do not override your distribution's managed-Python protections.
+
+For an isolated installation, use `sh install-source.sh --prefix /absolute/directory`; the launcher, application and desktop file stay under that prefix.
 
 ## Connect and capture
 
@@ -94,12 +100,24 @@ Open it from **Sessions → New TFTP File Transfer tab** or as an SSH companion.
 
 1. In a network or file tab, enter the host, username and authentication details. Use **Choose key file** for SSH key authentication. A separate key-passphrase field is available.
 2. Check **Remember password / passphrase** to retain those secrets. Check **Store a private-key copy** to keep an encrypted copy instead of relying on the original file path. Leave it unchecked to keep just a reference to your existing key file. The original key file is never modified.
-3. Check **Auto-connect on selection**, then save a named profile. Choosing that profile from the list fills the settings and connects. Refreshing the list or opening the app does not start connections. **Load** fills settings without connecting. A serial tab also has an optional connect-on-selection checkbox.
+3. Check **Auto-connect on selection**, then save a named profile. Choosing that profile from the list fills the settings and connects. Refreshing the list does not start connections. **Load** fills settings without connecting. Startup restoration asks by default, and reconnection needs its own explicit choice or saved preference. A serial tab also has an optional connect-on-selection checkbox.
 4. Use **Security → Set / change master password** to require a password before the main window opens. Close and reopen to lock the app. Canceling the unlock prompt exits without opening sessions. There is no forgotten-password recovery.
 
 The vault uses AES-256-GCM authenticated encryption; a master-password key is derived using scrypt with a fresh salt. Without a master password, the vault is encrypted with a random local key stored in a file restricted to your account. **Local-key mode does not protect against someone who can access your Linux account and read both files.** Master-password mode removes that local key and requires your password to decrypt the vault. Back up the vault; in local-key mode, back up `credentials.key` too. There is no automatic cloud synchronization.
 
 Master-password protection covers saved network/file credentials and gates opening the application. It does not encrypt notes, serial profiles, session logs, exports or the original private-key files. An unlocked running app and authenticated sessions still hold usable secrets in memory. Set a strong master password and use your desktop's screen lock when leaving the computer.
+
+Password-manager notes, private-key copies, workspace snapshots and startup preferences are inside the encrypted vault. The separate Notepad remains a local plaintext scratchpad. Clipboard clearing checks that the copied password is still on the clipboard; it leaves replacement content alone. Clipboard-history utilities may retain their own copies.
+
+To link a password-manager entry, select the intended SSH or remote-file tab, open the manager, select the entry, and choose **Fill current … login**. Save the device profile to retain the link. Later edits to that vault entry are used when loading/connecting the profile. Editing login fields manually detaches the link. Filling never sends text into a console or starts a connection. Separate FTP credentials remain separate from SSH credentials.
+
+## Workspace restoration
+
+Tabs are saved periodically when their state changes and on a normal exit. **Workspace → Save workspace now** saves immediately. On the next launch, unlock first if a master password is configured, then review the restore prompt. **Reconnect sessions that were connected** is off by default. **Use my choice at future startups** explicitly changes the default ask behavior; all choices are also available under **Startup / restore settings**.
+
+Restoration retains tab types/order/titles, selected tab, serial settings, non-secret connection fields, linked saved profiles, remote folders, and SSH/file-tab relationships. It rebuilds disconnected tabs unless reconnection was selected. Same-port SFTP/SCP companions share the restored SSH login. Local terminals start a fresh shell if reconnection is selected. Console contents, command-bar text, unsaved passwords/private-key material, logging, and upload/download queues are not restored. TFTP never resumes a transfer automatically. Save authentication in a profile or password-manager entry if it is needed after restart.
+
+Declining restoration preserves the previous snapshot until you use/change the new workspace or save it explicitly. A manual restore asks before replacing current tabs. File operations must finish first. Multiple running app windows retain the vault's conflicting-write protection; a window with stale data cannot overwrite credentials saved by another window.
 
 SSH host-key checks remain in effect for auto-connect. Unverified or legacy TLS connections still require explicit confirmation. Opening a file tab from SSH reuses authentication through an independent SSH channel; SFTP support is still required for directory browsing, including SCP mode.
 
@@ -116,7 +134,7 @@ python3 scripts/build-release.py
 
 Output in `dist/`: `.deb`, source `.tar.gz`, and `SHA256SUMS`. The builder uses an explicit file list, excluding profiles, logs, notes, reference binaries and local configuration.
 
-Tests run on Linux and Windows and exercise serial loopback and Linux pseudo-terminal RX/TX/unplug handling; Telnet negotiation and a real loopback server; TLS Telnet with a local certificate; a local SSH server and fingerprint trust; a local shell; real SFTP and SCP upload/download on a shared SSH connection; encrypted-vault integrity, master-password and profile auto-connect checks; notes; small-screen sizing; and update version, checksum and archive-path validation. Windows-specific tests cover DPAPI and the actual Windows pseudo-terminal; POSIX-only tests are skipped on Windows. Physical serial devices, real Mitel controllers and external file servers still require equipment-specific validation.
+Tests run on Linux and Windows and exercise serial loopback and Linux pseudo-terminal RX/TX/unplug handling; Telnet negotiation and a real loopback server; TLS Telnet with a local certificate; a local SSH server and fingerprint trust; a local shell; real SFTP and SCP upload/download on a shared SSH connection; encrypted-vault integrity, master-password and profile auto-connect checks; workspace consent/restoration and real transfers through a restored SSH companion; masked import previews and synthetic export fixtures; linked password entries, clipboard clearing, command-reference insertion without execution; notes; small-screen sizing; and update version, checksum and archive-path validation. Windows-specific tests cover DPAPI and the actual Windows pseudo-terminal; POSIX-only tests are skipped on Windows. Physical serial devices, real Mitel controllers and external file servers still require equipment-specific validation.
 
 GitHub Actions runs Linux tests on pushes and pull requests; Windows tests and bundled-executable smoke checks run in the Windows release workflow. Changing `version.py` on `main` publishes a matching GitHub release, with Linux installers and checksums, after tests pass. A separate Windows workflow builds the installer, portable archive and Windows source ZIP and publishes `windows-v<version>` without replacing the Linux latest-release marker. Releases are immutable through the workflow: increment the version for subsequent changes.
 

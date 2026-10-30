@@ -15,6 +15,8 @@ from credential_vault import CredentialVault, VaultError
 from profile_ui import SecurityMenu, unlock_vault, DeviceManager
 from ui_settings import ConsoleSettings, preferences, apply_palette
 from tftp_transfer import TFTPTransfer
+from workspace import WorkspaceController
+from password_manager import PasswordManager,ClipboardGuard
 from version import VERSION
 from network_ui import NetworkConsole, FileBrowser, Notepad
 from updates import UpdateController
@@ -328,7 +330,8 @@ class SerialConsole(QWidget):
         w = QComboBox(); w.addItems(items); w.setEditable(editable); w.setCurrentText(selected); return w
 
     def error(self, title, error):
-        QMessageBox.warning(self, title, str(error))
+        if getattr(self,'quiet_errors',False):self.statusBar().showMessage(title+': '+str(error))
+        else:QMessageBox.warning(self, title, str(error))
 
     def refresh_ports(self):
         current = self.port.currentText(); selected = self.port.currentData() if self.port.currentIndex() >= 0 and current == self.port.itemText(self.port.currentIndex()) else None
@@ -347,10 +350,10 @@ class SerialConsole(QWidget):
         if not self.serial and not self.port.view().isVisible() and not self.port.hasFocus():
             self.refresh_ports()
 
-    def settings(self):
+    def settings(self,require_port=True):
         port = self.port.currentData() if self.port.currentIndex() >= 0 and self.port.currentText() == self.port.itemText(self.port.currentIndex()) else self.port.currentText().strip()
         baud = int(self.baud.currentText())
-        if baud <= 0 or not port:
+        if baud <= 0 or (require_port and not port):
             raise ValueError('Select a port and a positive baud rate.')
         return dict(port=port, baudrate=baud, bytesize=int(self.bits.currentText()),
                     parity={'None':'N','Even':'E','Odd':'O','Mark':'M','Space':'S'}[self.parity.currentText()],
@@ -513,7 +516,7 @@ class SerialConsole(QWidget):
 
 
 class Window(QMainWindow):
-    def __init__(self,vault=None,check_updates=True):
+    def __init__(self,vault=None,check_updates=True,restore_workspace=True):
         super().__init__()
         self.vault=vault or CredentialVault()
         if self.vault.locked: raise VaultError('Unlock Serial Desk before opening the main window.')
@@ -547,13 +550,26 @@ class Window(QMainWindow):
         view.addAction('Larger console text',lambda:self.zoom_console(1),'Ctrl++')
         view.addAction('Smaller console text',lambda:self.zoom_console(-1),'Ctrl+-')
         devices=self.menuBar().addMenu('Devices');devices.addAction('Saved devices and groups…',self.manage_devices,'Ctrl+Shift+D')
+        devices.addAction('Import sessions / passwords…',self.import_connections)
         settings=self.menuBar().addMenu('Settings');settings.addAction('Console appearance…',self.console_settings)
+        self.clipboard_guard=ClipboardGuard(self)
         self.security=SecurityMenu(self,self.vault); self.updates=UpdateController(self,startup=check_updates); self.apply_style()
+        self.workspace=WorkspaceController(self,startup=restore_workspace)
+        from command_reference import CommandReference
+        self.reference=CommandReference(self)
+        help_menu=self.menuBar().addMenu('Help');help_menu.addAction('Command reference…',self.reference.open_reference,'F1')
+    def password_manager(self):PasswordManager(self).exec_()
+    def import_connections(self,passwords=False):
+        from session_import import ImportDialog
+        dialog=ImportDialog(self.vault,self,passwords=passwords)
+        if dialog.exec_()==QDialog.Accepted:self.refresh_profiles()
     def manage_devices(self):
         dialog=DeviceManager(self.vault,self);dialog.changed.connect(self.refresh_profiles);dialog.open_device.connect(self.open_saved_device);dialog.exec_()
     def open_saved_device(self,name,files):
         p=self.vault.profiles.get(name)
         if not p:return
+        if p.get('protocol')=='Serial':
+            widget=self.new_serial();widget.apply(p['serial_settings']);self.name_tab(widget,name);widget.toggle_connection();return
         if files:
             protocol=p.get('file_protocol',p.get('protocol') if p.get('protocol') in ('SFTP','SCP','FTP','FTPS','TFTP') else 'SFTP')
             widget=self.new_tftp() if protocol=='TFTP' else self.new_files()
@@ -582,7 +598,9 @@ class Window(QMainWindow):
         return widget
     def name_tab(self,widget,title):
         index=self.tabs.indexOf(widget)
-        if index>=0: self.tabs.setTabText(index,title[:35]); self.tabs.setTabToolTip(index,title)
+        if index>=0:
+            if not getattr(widget,'custom_tab_title',False):self.tabs.setTabText(index,title[:35])
+            self.tabs.setTabToolTip(index,title)
     def new_serial(self):
         store=getattr(self,'serial_store',None)
         widget=SerialConsole(store); self.serial_store=widget.store; widget.profiles_changed.connect(self.refresh_profiles)
@@ -596,24 +614,33 @@ class Window(QMainWindow):
     def new_files(self): return self.add_tab(FileBrowser(self.vault),'Remote File Manager')
     def browse_ssh(self,source,protocol,automatic=False):
         if not source.worker or not source.worker.ssh_handle:return
+        import uuid
+        if not hasattr(source,'workspace_id'):source.workspace_id=uuid.uuid4().hex
         from device_profiles import for_context
         original=self.tabs.currentWidget();settings=source.last_settings or {};name=source.profile_bar.combo.currentText();profile=self.vault.profiles.get(name,{})
+        if automatic and protocol in ('SFTP','SCP'):
+            # Reuse a restored companion instead of opening a duplicate after a manual reconnect.
+            existing=next((w for w in self.widgets() if isinstance(w,FileBrowser) and getattr(w,'ssh_source_id','')==source.workspace_id and w.credentials.protocol.currentText()==protocol and w.credentials.host.text()==settings.get('host') and w.credentials.port.text()==str(settings.get('port'))),None)
+            if existing is not None:
+                if existing.remote is None and not self.busy(existing):existing.attach_ssh(source.worker.ssh_handle,protocol,dict(settings,remote_path=existing.credentials.remote_path.text()))
+                return
         if protocol=='TFTP':
             widget=self.new_tftp();widget.credentials.apply(dict(settings,protocol='TFTP',port=settings.get('file_port',69)))
         else:
             widget=self.new_files()
             if name:widget.profile_bar.combo.setCurrentText(name)
             if automatic and protocol in ('SFTP','SCP') and settings.get('file_port',settings.get('port'))!=settings.get('port'):
-                widget.credentials.apply(for_context(profile,['SFTP','SCP','FTP','FTPS']) if profile else dict(settings,protocol=protocol,port=settings['file_port']))
+                widget.credentials.apply(self.vault.resolve_login(for_context(profile,['SFTP','SCP','FTP','FTPS'])) if profile else dict(settings,protocol=protocol,port=settings['file_port']))
                 widget.connect_remote()
             elif protocol in ('SFTP','SCP'):
+                widget.ssh_source_id=source.workspace_id
                 try:widget.attach_ssh(source.worker.ssh_handle,protocol,settings)
                 except Exception as e:QMessageBox.warning(self,'Remote File Manager',str(e))
             else:
-                clean={k:v for k,v in settings.items() if k not in ('user','password','passphrase','key','key_data')}
+                clean={k:v for k,v in settings.items() if k not in ('user','password','passphrase','key','key_data','credential_ref')}
                 widget.credentials.apply(dict(clean,protocol=protocol,port=settings.get('file_port',21),user='',password='',key='',key_data=''))
                 if profile and profile.get('file_login') and profile.get('file_remember'):
-                    widget.credentials.apply(for_context(profile,['SFTP','SCP','FTP','FTPS']));widget.connect_remote()
+                    widget.credentials.apply(self.vault.resolve_login(for_context(profile,['SFTP','SCP','FTP','FTPS'])));widget.connect_remote()
                 else:widget.status.setText('Companion '+protocol+' service • enter its login and Connect. SSH credentials are not sent to this service.')
         if automatic:self.tabs.setCurrentWidget(original)
     def duplicate_session(self,source):
@@ -627,7 +654,7 @@ class Window(QMainWindow):
     def rename_tab(self,index):
         if index<0: return
         title,ok=QInputDialog.getText(self,'Rename tab','Tab name:',text=self.tabs.tabText(index))
-        if ok and title.strip(): self.tabs.setTabText(index,title.strip())
+        if ok and title.strip(): self.tabs.setTabText(index,title.strip());self.tabs.widget(index).custom_tab_title=True
     def refresh_profiles(self):
         for widget in self.widgets():
             if hasattr(widget,'profile_bar'): widget.profile_bar.refresh()
@@ -650,6 +677,9 @@ class Window(QMainWindow):
     def closeEvent(self,event):
         if any(self.busy(w) for w in self.widgets()) or (self.updates.task and self.updates.task.isRunning()):
             QMessageBox.information(self,'Operation in progress','Please let file transfers and updates finish before closing.'); event.ignore(); return
+        if not self.workspace.save(report=False):
+            if QMessageBox.question(self,'Workspace was not saved','The workspace could not be saved, possibly because another app window changed the vault. Close without saving tabs?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:event.ignore();return
+        self.workspace.shutdown();self.clipboard_guard.clear();self.reference.close()
         for widget in self.widgets(): widget.shutdown()
         self.updates.shutdown(); self.vault.lock(); event.accept()
     def apply_style(self):
@@ -714,7 +744,7 @@ def main():
     try:
         vault=CredentialVault()
         if not unlock_vault(vault): return
-        window=Window(vault,check_updates='--smoke-test' not in sys.argv); window.show()
+        window=Window(vault,check_updates='--smoke-test' not in sys.argv,restore_workspace='--smoke-test' not in sys.argv); window.show()
         if '--smoke-test' in sys.argv:
             run_smoke_test(app,window,Path(sys.argv[sys.argv.index('--smoke-test')+1]))
     except (VaultError,OSError) as e:

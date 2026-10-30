@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 dist/
 INSTALL_MODE
+INSTALL_PREFIX
 *.jsonl
 *.log
 preview*.png
