@@ -10,7 +10,7 @@ from tftp_transfer import TFTPTransfer
 from device_profiles import for_context
 
 PUBLIC_FIELDS=('protocol','host','port','user','key','ca','unverified','legacy','remote_path',
-               'open_files','file_protocol','file_port','credential_ref')
+               'open_files','file_protocol','file_port','credential_ref','local_cwd','local_folder','follow_terminal','show_hidden')
 DEFAULT_OPTIONS=dict(save=True,policy='ask',reconnect=False,geometry=True)
 
 
@@ -94,6 +94,7 @@ class WorkspaceController(QObject):
                 if isinstance(widget,NetworkConsole):
                     # Secrets are cleared from the form on connect; last_settings has only metadata.
                     if widget.worker and widget.worker.isRunning():s.update({k:v for k,v in (widget.last_settings or {}).items() if k in PUBLIC_FIELDS})
+                    if hasattr(widget,'local_browser'):s.update(widget.local_browser.settings())
                     record.update(kind='local' if c.protocol.currentText()=='Local terminal' else 'network',connected=widget.state.text()=='Connected')
                 elif isinstance(widget,FileBrowser):
                     record.update(kind='files',connected=widget.remote is not None,source=getattr(widget,'ssh_source_id',''))
@@ -148,6 +149,7 @@ class WorkspaceController(QObject):
         if not isinstance(records,list) or len(records)>256:raise VaultError('Invalid or excessively large workspace.')
         if any(not isinstance(r,dict) or not isinstance(r.get('settings',{}),dict) for r in records):raise VaultError('Invalid workspace tab data.')
         window=self.window;notes=window.notes
+        if any(hasattr(w,'prepare_close') and not w.prepare_close() for w in window.widgets()):return False
         for widget in window.widgets():
             if widget is not notes:widget.shutdown()
         while window.tabs.count():
@@ -178,6 +180,7 @@ class WorkspaceController(QObject):
                         settings=fields
                         if record.get('profile'):problems.append('A saved profile is missing; re-enter its login.')
                     widget.credentials.apply(self.vault.resolve_login(settings))
+                    if kind=='local':widget.local_browser.apply(settings)
                     widget.quiet_errors=True
                 widget.custom_tab_title=record.get('custom_title',False)
                 window.tabs.setTabText(window.tabs.indexOf(widget),record.get('title') or kind)

@@ -4,6 +4,9 @@ A native Linux and Windows desktop toolkit for serial consoles, network maintena
 
 ## Features
 
+- **Local files beside the terminal:** the left pane lists local folders/files and follows the local shell's current directory. Pause **Follow terminal folder** to browse independently; use Up/Home/history, hidden-file and filename filters, create files/folders, rename, copy paths, or insert a quoted path / `cd` command for review. **Ctrl+B** hides/shows the session sidebar. Folder navigation never sends terminal input.
+- **Local and remote text editing:** double-click a text file or choose **Edit text**. The editor supports search/replace, undo/redo, word wrap, UTF-8/BOM/UTF-16/Windows-1252, line-ending selection, save/reload and local copies. Saves check for outside changes and stage data before replacing the original. Unsaved edits require save/discard/cancel before closing the editor, tab, workspace or application. See the editing details below.
+- **Terminal keyboard fixes:** Tab and Shift+Tab reach the session for completion; Enter returns a scrolled console to the live cursor. SSH tabs offer **Paste saved password**, including linked password-manager entries, without adding Enter. Outgoing password bytes from this button are redacted from logs.
 - **Saved workspaces:** save tab order, custom names, connection settings, remote folders and window geometry in the encrypted vault. Startup asks before restoration by default. Choose ask/always/never and optional reconnection under **Workspace → Startup / restore settings**. Master-password unlock happens first; commands and transfers are never replayed.
 - **Offline command reference:** **Help → Command reference** or **F1** opens a separate searchable window for Linux, Windows Command Prompt/PowerShell, macOS, Cisco IOS/IOS XE, HP/ArubaOS-Switch, Aruba AOS-CX, HPE/H3C Comware, ADTRAN AOS, Juniper Junos and MikroTik RouterOS. Copy examples or insert them into the active command bar for review, without executing them.
 - **Optional password manager:** **Security → Password manager** (**Ctrl+Shift+P**) stores manually entered logins, encrypted notes and optional private-key copies. Generate passwords, copy passwords with a 30-second clipboard clear, or link an entry to a device profile so its login stays synchronized.
@@ -26,7 +29,7 @@ The terminal handles basic cursor/erase sequences and UTF-8 text. It is a mainte
 
 ## Windows version
 
-Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.4.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
+Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.5.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
 
 See [Windows installation, source and build instructions](docs/WINDOWS.md). The Windows local terminal runs Command Prompt, COM ports use Windows names, and local credential keys use Windows DPAPI. Startup update checks select the matching Windows release channel.
 
@@ -35,7 +38,7 @@ See [Windows installation, source and build instructions](docs/WINDOWS.md). The 
 For **Ubuntu 24.04+ / Debian 13+** with Python 3.12 or newer:
 
 ```sh
-sudo apt install ./serial-desk_1.4.0_all.deb
+sudo apt install ./serial-desk_1.5.0_all.deb
 serial-desk
 ```
 
@@ -118,6 +121,26 @@ Tabs are saved periodically when their state changes and on a normal exit. **Wor
 Restoration retains tab types/order/titles, selected tab, serial settings, non-secret connection fields, linked saved profiles, remote folders, and SSH/file-tab relationships. It rebuilds disconnected tabs unless reconnection was selected. Same-port SFTP/SCP companions share the restored SSH login. Local terminals start a fresh shell if reconnection is selected. Console contents, command-bar text, unsaved passwords/private-key material, logging, and upload/download queues are not restored. TFTP never resumes a transfer automatically. Save authentication in a profile or password-manager entry if it is needed after restart.
 
 Declining restoration preserves the previous snapshot until you use/change the new workspace or save it explicitly. A manual restore asks before replacing current tabs. File operations must finish first. Multiple running app windows retain the vault's conflicting-write protection; a window with stale data cannot overwrite credentials saved by another window.
+
+Local-terminal snapshots also retain the last shell folder, independently browsed folder, follow mode and hidden-file setting. Reconnection starts a fresh shell in the saved shell folder; open text-editor contents are not included in workspace snapshots.
+
+## Local files and text editing
+
+Local terminal tabs have a filesystem pane on the left. **Follow terminal folder** is on by default. Changing directory in the local shell updates the pane; browsing folders yourself pauses following until you check it again. Linux reads the shell's `/proc` directory; Windows reads the current-directory field of its own Command Prompt process. Tracking does not alter prompts, modify shell startup files or send hidden commands. Nested remote sessions and nested shells have their own directories; the pane follows the original local shell.
+
+Double-click folders to browse and text files to edit. **New…** creates a text file/folder; **More…** offers encoding selection, rename, path copying, quoted-path/`cd` insertion and opening the current folder in the system file manager. Inserted commands remain in the command bar for review and are not executed automatically. The filesystem view watches local changes. Remote files have **Edit text**, **Text options**, **Copy path**, and existing Upload/Download actions. Binary/larger files should use Download or a dedicated editor.
+
+The editor handles regular text files up to **2 MiB**. Existing UTF-8/UTF-16 BOMs and uniform LF/CRLF/CR endings are retained. Select Windows-1252 explicitly with **Open with encoding** for legacy text. Mixed line endings need an explicit format choice before saving. Control/binary data and special Unicode line separators are rejected. **Ctrl+S** saves, **Ctrl+Shift+S** saves a local copy, **Ctrl+F** finds, and **Ctrl+W** closes the editor. Saving a copy leaves the original buffer marked unsaved. There is no automatic upload or text-file autosave.
+
+Local saves use a same-folder temporary file and replacement, preserve permissions/ownership and available extended attributes, and preserve symlink targets. Files with multiple hard links require a copy. Conflicting external content/identity changes leave the original untouched and your edits available for reload or a separate copy. File permissions still apply; the editor does not elevate privileges.
+
+Remote SFTP and SCP-mode editing uses the existing SFTP channel. It preserves reported owner/group/mode, prefers the server's atomic POSIX rename extension, and otherwise uses a backup/rename sequence with rollback. FTP/FTPS direct saves require regular-file permission metadata and `SITE CHMOD` support; servers without those capabilities can still open text and save local copies for manual upload. Remote backups are retained and reported if cleanup/rollback cannot finish. A backup/rename fallback has a brief replacement gap, and remote metadata/ACL capabilities depend on the server. No remote shell commands are used for file editing.
+
+## SSH password paste and live output
+
+After connecting with a saved SSH profile, **Paste saved password** sends its saved password to the active terminal, without a newline. Linked password-manager entries are resolved when you click, so updated logins are used. The button is disabled when there is no matching saved login. Passwords containing control characters are refused. Use it at a password prompt: pasting at a normal shell prompt can expose the password through remote echo or shell history. The button's outgoing bytes are omitted from session logs; remote echoes and manually typed passwords can still appear in logs.
+
+Tab/Shift+Tab are sent to the console session instead of moving focus between widgets. Ctrl+Tab remains available for tab navigation. Pressing Enter in the console or command bar returns the viewport to the live cursor, including an empty Enter after scrolling back.
 
 SSH host-key checks remain in effect for auto-connect. Unverified or legacy TLS connections still require explicit confirmation. Opening a file tab from SSH reuses authentication through an independent SSH channel; SFTP support is still required for directory browsing, including SCP mode.
 

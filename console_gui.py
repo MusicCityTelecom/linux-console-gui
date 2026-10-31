@@ -5,7 +5,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings,QEvent
 from PyQt5.QtGui import QColor, QFont, QTextCursor, QKeySequence, QPainter
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFormLayout, QGroupBox, QComboBox, QPushButton, QLabel, QCheckBox, QPlainTextEdit,
@@ -73,7 +73,16 @@ class Terminal(QPlainTextEdit):
         else:painter.setPen(color);painter.drawRect(rect.adjusted(0,0,-1,-1))
         painter.end()
 
+    def event(self,event):
+        # QWidget handles focus traversal before keyPressEvent sees Tab.
+        if event.type()==QEvent.KeyPress and event.key() in (Qt.Key_Tab,Qt.Key_Backtab) and not event.modifiers() & (Qt.ControlModifier|Qt.AltModifier):
+            self.outgoing.emit(b'\x1b[Z' if event.key()==Qt.Key_Backtab or event.modifiers() & Qt.ShiftModifier else b'\t');event.accept();return True
+        return super().event(event)
+    def reveal_live(self):
+        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+        cursor=QTextCursor(self.document());cursor.setPosition(min(self.saved_position,self.document().characterCount()-1));self.setTextCursor(cursor);self.ensureCursorVisible()
     def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return,Qt.Key_Enter):self.reveal_live()
         if event.matches(QKeySequence.Copy) and self.textCursor().hasSelection():
             self.copy()
             return
@@ -427,6 +436,7 @@ class SerialConsole(QWidget):
             self.error('Send failed', e)
 
     def send_line(self):
+        self.terminal.reveal_live()
         try:
             data = bytes.fromhex(self.input.text()) if self.hex_send.isChecked() else self.input.text().encode('utf-8')
             if not self.hex_send.isChecked():
@@ -546,7 +556,7 @@ class Window(QMainWindow):
         self.tabs.setCornerWidget(plus,Qt.TopRightCorner)
         view=self.menuBar().addMenu('View')
         view.addAction('Maximize / restore',lambda:self.showNormal() if self.isMaximized() else self.showMaximized(),'F11')
-        view.addAction('Show / hide serial settings',self.toggle_sidebar,'Ctrl+B')
+        view.addAction('Show / hide session sidebar',self.toggle_sidebar,'Ctrl+B')
         view.addAction('Larger console text',lambda:self.zoom_console(1),'Ctrl++')
         view.addAction('Smaller console text',lambda:self.zoom_console(-1),'Ctrl+-')
         devices=self.menuBar().addMenu('Devices');devices.addAction('Saved devices and groups…',self.manage_devices,'Ctrl+Shift+D')
@@ -647,6 +657,7 @@ class Window(QMainWindow):
         local=source.credentials.protocol.currentText()=='Local terminal'
         widget=self.new_network(local=local)
         widget.credentials.apply(source.last_settings or source.credentials.values())
+        if local:widget.local_browser.apply(source.local_browser.settings())
         # Copy selected saved profile on purpose; never auto-send credentials or commands on duplication.
         name=source.profile_bar.combo.currentText()
         if name:
@@ -658,10 +669,14 @@ class Window(QMainWindow):
     def refresh_profiles(self):
         for widget in self.widgets():
             if hasattr(widget,'profile_bar'): widget.profile_bar.refresh()
+            if isinstance(widget,NetworkConsole):widget.update_password_button()
             if isinstance(widget,SerialConsole): widget.refresh_profiles()
     def toggle_sidebar(self):
         widget=self.tabs.currentWidget()
         if isinstance(widget,SerialConsole): widget.sidebar.setVisible(not widget.sidebar.isVisible())
+        elif isinstance(widget,NetworkConsole):
+            sidebar=widget.local_browser if hasattr(widget,'local_browser') else widget.sidebar_area
+            sidebar.setVisible(not sidebar.isVisible())
     def zoom_console(self,amount):
         widget=self.tabs.currentWidget()
         if hasattr(widget,'terminal'): widget.terminal.zoomIn(amount)
@@ -673,10 +688,12 @@ class Window(QMainWindow):
         if self.busy(widget): QMessageBox.information(self,'Transfer in progress','Let the current file operation finish before closing this tab.'); return
         active=(isinstance(widget,SerialConsole) and widget.serial is not None) or (isinstance(widget,NetworkConsole) and widget.worker and widget.worker.isRunning()) or (isinstance(widget,FileBrowser) and widget.remote)
         if active and QMessageBox.question(self,'Close session','Disconnect and close this tab?')!=QMessageBox.Yes: return
+        if hasattr(widget,'prepare_close') and not widget.prepare_close():return
         widget.shutdown(); self.tabs.removeTab(index); widget.deleteLater()
     def closeEvent(self,event):
         if any(self.busy(w) for w in self.widgets()) or (self.updates.task and self.updates.task.isRunning()):
             QMessageBox.information(self,'Operation in progress','Please let file transfers and updates finish before closing.'); event.ignore(); return
+        if any(hasattr(w,'prepare_close') and not w.prepare_close() for w in self.widgets()):event.ignore();return
         if not self.workspace.save(report=False):
             if QMessageBox.question(self,'Workspace was not saved','The workspace could not be saved, possibly because another app window changed the vault. Close without saving tabs?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:event.ignore();return
         self.workspace.shutdown();self.clipboard_guard.clear();self.reference.close()

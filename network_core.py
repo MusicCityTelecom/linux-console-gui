@@ -10,6 +10,7 @@ import struct
 import subprocess
 import threading
 import queue
+import time
 from pathlib import Path
 from platform_support import config_directory
 import paramiko
@@ -134,6 +135,7 @@ class Task(QThread):
     def run(self):
         try: self.completed.emit(self.function(self), '')
         except Exception as e: self.completed.emit(None, str(e))
+        finally:self.function=None
 
 
 class Session(QThread):
@@ -142,6 +144,8 @@ class Session(QThread):
     state = pyqtSignal(str)
     failed = pyqtSignal(str)
     question = pyqtSignal(str, str)
+    directory_changed = pyqtSignal(str)
+    secret_sent = pyqtSignal(int)
     def __init__(self, settings, parent=None):
         super().__init__(parent); self.settings = settings; self.output = queue.Queue(maxsize=1024)
         self.event = threading.Event(); self.answer = False; self.dimensions = (120, 40); self.ssh_handle = None
@@ -152,14 +156,18 @@ class Session(QThread):
         return self.answer
     def respond(self, answer): self.answer = answer; self.event.set()
     def send(self, data): self.output.put_nowait(data)
+    def send_secret(self,data):self.output.put_nowait((data,True))
     def stop(self): self.requestInterruption(); self.event.set()
     def run(self):
         s = self.settings; sock = client = channel = process = None; master = None; winproc = None
+        last_directory=None;directory_poll=0
         try:
             protocol = s['protocol']; codec = TelnetCodec()
+            local_cwd=s.get('local_cwd') or str(Path.home())
+            if protocol=='Local terminal' and not Path(local_cwd).is_dir():local_cwd=str(Path.home())
             if protocol == 'Local terminal' and os.name=='nt':
                 from winpty import PtyProcess
-                winproc=PtyProcess.spawn([os.environ.get('COMSPEC','cmd.exe'),'/Q'],cwd=str(Path.home()),dimensions=(40,120))
+                winproc=PtyProcess.spawn([os.environ.get('COMSPEC','cmd.exe'),'/Q'],cwd=local_cwd,dimensions=(40,120))
             elif protocol == 'Local terminal':
                 import pty, fcntl, termios
                 master, slave = pty.openpty()
@@ -167,7 +175,7 @@ class Session(QThread):
                 shell = os.environ.get('SHELL', '/bin/bash')
                 helper = 'import fcntl,termios,os,sys; fcntl.ioctl(0,termios.TIOCSCTTY,0); os.execv(sys.argv[1],[sys.argv[1],"-i"])'
                 process = subprocess.Popen(['/usr/bin/python3', '-c', helper, shell], stdin=slave, stdout=slave, stderr=slave,
-                    start_new_session=True, env=dict(os.environ, TERM='vt100'), cwd=str(Path.home()))
+                    start_new_session=True, env=dict(os.environ, TERM='vt100'), cwd=local_cwd)
                 os.close(slave)
             elif protocol == 'SSH':
                 client = ssh_connect(s, self.ask)
@@ -189,8 +197,17 @@ class Session(QThread):
             for secret in ('password','passphrase','key_data'): self.settings.pop(secret, None)
             self.state.emit('Connected')
             while not self.isInterruptionRequested():
+                if (process is not None or winproc is not None) and time.monotonic()>=directory_poll:
+                    directory_poll=time.monotonic()+.4
+                    try:
+                        from local_terminal import process_directory
+                        directory=process_directory(process.pid if process is not None else winproc.pid)
+                        if directory!=last_directory:last_directory=directory;self.directory_changed.emit(directory)
+                    except (OSError,ValueError,UnicodeError,AttributeError,ImportError):pass
                 try: data = self.output.get_nowait()
                 except queue.Empty: data = None
+                sensitive=isinstance(data,tuple)
+                if sensitive:data=data[0]
                 if data:
                     if winproc is not None:
                         winproc.write(data.decode('utf-8',errors='replace').replace('\x7f','\b'))
@@ -199,7 +216,8 @@ class Session(QThread):
                         while view: view = view[os.write(master, view):]
                     elif channel: channel.sendall(data)
                     else: sock.sendall(codec.encode(data))
-                    self.sent.emit(data)
+                    if sensitive:self.secret_sent.emit(len(data))
+                    else:self.sent.emit(data)
                 chunk = None
                 if winproc is not None:
                     if select.select([winproc],[],[],.03)[0]:
@@ -227,7 +245,9 @@ class Session(QThread):
         except Exception as e:
             if not self.isInterruptionRequested(): self.failed.emit(str(e))
         finally:
-
+            while True:
+                try:self.output.get_nowait()
+                except queue.Empty:break
             for secret in ('password','passphrase','key_data'): self.settings.pop(secret, None)
             for resource in (channel, sock):
                 if resource:

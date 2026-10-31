@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0 — 2026-10-31
+
+- Replace the empty local-terminal sidebar with a local filesystem pane that follows shell directory changes on Linux and Windows, with independent browsing, history, hidden-file/filter controls, creation/rename, path copying, quoted-command insertion and Ctrl+B visibility.
+- Add local and remote text editing with encoding/BOM and line-ending handling, search/replace, reload, local copies, conflict checks, staged replacement, permission preservation and unsaved-edit close guards. SFTP uses atomic rename when supported, with backup/rollback fallback; FTP direct saving requires permission metadata/CHMOD support.
+- Deliver Tab and Shift+Tab to SSH/local/serial consoles before Qt focus traversal, and return to live output on Enter after scrolling back.
+- Add Paste saved password for matching active SSH profiles and linked password-manager entries, without Enter; redact the button's outgoing password bytes from logs.
+- Retain local pane folders/follow state in encrypted workspace snapshots. Add 20 regression tests, including real SSH keyboard/password traffic, live shell directory changes and SFTP editing/rollback.
+
 ## 1.4.0
 
 - Encrypted workspace snapshots retain tab order/names, selected tab, serial/network/file settings, remote folders and window geometry. Startup asks before restoration by default; ask/always/never policies and separate optional reconnection are configurable. Master unlock precedes restoration. Commands, unsaved secrets, logs and transfers are not replayed.

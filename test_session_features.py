@@ -86,7 +86,25 @@ class LocalSSHServer:
             def stat(self,path):
                 try:return paramiko.SFTPAttributes.from_stat(self.local(path).stat())
                 except OSError as e:return paramiko.SFTPServer.convert_errno(e.errno or 2)
-            lstat=stat
+            def lstat(self,path):
+                try:return paramiko.SFTPAttributes.from_stat(self.local(path).lstat())
+                except OSError as e:return paramiko.SFTPServer.convert_errno(e.errno or 2)
+            def chattr(self,path,attr):
+                try:paramiko.SFTPServer.set_file_attr(str(self.local(path)),attr);return paramiko.SFTP_OK
+                except OSError as e:return paramiko.SFTPServer.convert_errno(e.errno or 2)
+            def remove(self,path):
+                try:self.local(path).unlink();return paramiko.SFTP_OK
+                except OSError as e:return paramiko.SFTPServer.convert_errno(e.errno or 2)
+            def rename(self,old,new):
+                try:
+                    if getattr(outer,'fail_edit_promotion',False) and '.serial-desk-edit-' in old:raise OSError(13,'Injected promotion failure')
+                    if self.local(new).exists():return paramiko.SFTP_FAILURE
+                    self.local(old).rename(self.local(new));return paramiko.SFTP_OK
+                except OSError as e:return paramiko.SFTPServer.convert_errno(e.errno or 2)
+            def posix_rename(self,old,new):
+                if getattr(outer,'no_posix_rename',False):return paramiko.SFTP_OP_UNSUPPORTED
+                try:os.replace(self.local(old),self.local(new));return paramiko.SFTP_OK
+                except OSError as e:return paramiko.SFTPServer.convert_errno(e.errno or 2)
             def open(self,path,flags,attr):
                 try:
                     fd=os.open(self.local(path),flags|getattr(os,'O_BINARY',0),0o600); mode='r+b' if flags&os.O_RDWR else 'wb' if flags&os.O_WRONLY else 'rb'
