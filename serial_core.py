@@ -1,7 +1,9 @@
-"""Serial transport, passive rate sampling, and atomic profile storage."""
+"""Serial transport, bounded prompt-assisted rate sampling, and profile storage."""
 import json
 import os
 import time
+import re
+import math
 from pathlib import Path
 from platform_support import config_directory
 import serial
@@ -48,28 +50,57 @@ def text_score(data):
     return good / len(data)
 
 
-def scan_rates(settings, cancelled, progress, seconds=1.4):
+def response_content(data):
+    data=re.sub(rb'\x1b\][^\x07]*(?:\x07|\x1b\\)',b'',bytes(data))
+    return re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]',b'',data)
+
+
+def scan_rates(settings, cancelled, progress, seconds=1.4,probe_count=0,probe_interval=.35,probe=b'\r',status=None):
+    """Listen first; optionally request a prompt with spaced line endings only."""
+    if not isinstance(probe_count,int) or not 0<=probe_count<=5:raise ValueError('Use zero through five Enter probes.')
+    if probe not in (b'\r',b'\n',b'\r\n'):raise ValueError('Only CR, LF or CRLF probes are supported.')
+    if not math.isfinite(seconds) or not .01<=seconds<=10 or not math.isfinite(probe_interval) or not .01<=probe_interval<=3:raise ValueError('Invalid scan timing.')
     results = []
     s = open_port(settings)
     try:
         for baud in BAUDS:
-            if cancelled():
-                break
-            s.baudrate = baud
+            if cancelled():break
+            if status:status(f'Testing {baud:,} baud • listening first…')
+            if probe_count:s.reset_output_buffer()
+            try:s.baudrate = baud
+            except (ValueError,serial.SerialException) as error:
+                result=dict(baud=baud,count=0,score=0,content_count=0,candidate=False,probes=0,preview='Unsupported rate: '+str(error));results.append(result);progress(result);continue
             s.reset_input_buffer()
-            time.sleep(0.08)
+            settle=time.monotonic()+.08
+            while time.monotonic()<settle and not cancelled():time.sleep(.01)
+            if cancelled():break
             data = bytearray()
-            end = time.monotonic() + seconds
-            while time.monotonic() < end and not cancelled():
-                data.extend(s.read(min(s.in_waiting, 8192)))
-                time.sleep(0.02)
-            result = dict(baud=baud, count=len(data), score=text_score(data),
-                          preview=bytes(data[:100]).decode('ascii', errors='replace'))
+            def collect(duration):
+                end=time.monotonic()+duration
+                while time.monotonic()<end and not cancelled():
+                    chunk=s.read(min(s.in_waiting,8192));data.extend(chunk[:max(0,65536-len(data))]);time.sleep(.02)
+            def readable():return sum(33<=b<127 for b in response_content(data))>=3 and text_score(data)>=.85
+            sent=0
+            if probe_count:
+                collect(min(.25,seconds))
+                for index in range(probe_count):
+                    if cancelled() or readable():break
+                    if status:status(f'Testing {baud:,} baud • Enter {index+1}/{probe_count}…')
+                    try:written=s.write(probe)
+                    except serial.SerialTimeoutException as error:raise OSError('Enter probe timed out. Check flow control/CTS or retry in listen-only mode.') from error
+                    if written!=len(probe):raise OSError('The complete Enter probe could not be sent.')
+                    sent+=1
+                    if index+1<probe_count:collect(probe_interval)
+            collect(seconds)
+            content=response_content(data);count=sum(33<=b<127 for b in content)
+            result = dict(baud=baud,count=len(data),score=text_score(data),content_count=count,candidate=readable(),probes=sent,
+                          preview=content[:160].decode('ascii',errors='replace'))
             results.append(result)
             progress(result)
+            if cancelled():break
     finally:
         s.close()
-    return sorted(results, key=lambda r: (r['score'] if r['count'] >= 16 else -1, min(r['count'], 256)), reverse=True)
+    return sorted(results,key=lambda r:(r['candidate'],r['score'] if r['content_count']>=3 else -1,min(r['content_count'],256)),reverse=True)
 
 
 def validate_settings(raw):

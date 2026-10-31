@@ -23,6 +23,13 @@ def button(text, callback, layout):
     b = QPushButton(text); b.clicked.connect(callback); layout.addWidget(b); return b
 
 
+def answer_credential(parent,worker,title,prompt,secret):
+    if worker.isInterruptionRequested():worker.respond_credential(None);return
+    dialog=QInputDialog(parent);dialog.setWindowTitle('SSH login — '+title[:120]);dialog.setLabelText(prompt[:2000]);dialog.setTextEchoMode(QLineEdit.Password if secret else QLineEdit.Normal)
+    for label in dialog.findChildren(QLabel):label.setTextFormat(Qt.PlainText)
+    accepted=dialog.exec_()==QInputDialog.Accepted;answer=dialog.textValue() if accepted else None;dialog.setTextValue('');dialog.deleteLater();worker.respond_credential(answer)
+
+
 class Credentials(QWidget):
     def __init__(self, protocols):
         super().__init__();self.credential_ref=''; form=QFormLayout(self);self.form=form;form.setRowWrapPolicy(QFormLayout.WrapAllRows)
@@ -32,6 +39,10 @@ class Credentials(QWidget):
         self.user=QLineEdit();form.addRow('Username',self.user)
         self.password=QLineEdit();self.password.setEchoMode(QLineEdit.Password);form.addRow('Password',self.password)
         show=QCheckBox('Show password');show.toggled.connect(lambda visible:self.password.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password));form.addRow(show);self.show_password=show
+        self.ssh_auth=QComboBox()
+        for label,value in [('Automatic','auto'),('Password','password'),('Keyboard-interactive / device prompts','interactive'),('Keys / SSH agent','keys')]:self.ssh_auth.addItem(label,value)
+        form.addRow('SSH login method',self.ssh_auth)
+        self.ssh_legacy=QCheckBox('Legacy SSH algorithms (older devices)');self.ssh_legacy.setToolTip('Per-device compatibility: supported SHA-1 DH/RSA, CBC and older MACs. RSA authentication uses ssh-rsa for old servers. Host fingerprints are still verified. Unsupported SSHv1/removed algorithms are not added.');form.addRow(self.ssh_legacy)
         self.key_group=QGroupBox('SSH private key (optional)');self.key_group.setCheckable(True)
         key_layout=QVBoxLayout(self.key_group);self.key_body=QWidget();key_form=QFormLayout(self.key_body);key_form.setRowWrapPolicy(QFormLayout.WrapAllRows);key_layout.addWidget(self.key_body)
         self.key=QLineEdit();self.key.setPlaceholderText('SSH agent / default keys if blank');key_form.addRow('Private key path',self.key)
@@ -65,6 +76,7 @@ class Credentials(QWidget):
         for w in (self.host,self.port):self.row_visible(w,not local)
         for w in (self.user,self.password,self.show_password):self.row_visible(w,auth)
         self.row_visible(self.key_group,ssh)
+        for w in (self.ssh_auth,self.ssh_legacy):self.row_visible(w,ssh)
         for w in (self.ca,self.unverified):self.row_visible(w,tls)
         self.row_visible(self.legacy,p=='Mitel TLS Telnet')
         for w in (self.open_files,self.file_protocol,self.file_port):self.row_visible(w,p=='SSH')
@@ -86,6 +98,7 @@ class Credentials(QWidget):
         port=int(self.port.text())
         if not 1<=port<=65535:raise ValueError('Port must be between 1 and 65535.')
         result=dict(protocol=p,host=self.host.text().strip(),port=port,user=self.user.text().strip(),password=self.password.text(),passphrase=self.passphrase.text(),key=self.key.text().strip(),key_data=self.key_data,credential_ref=self.credential_ref if p in ('SSH','SFTP','SCP','FTP','FTPS') else '',ca=self.ca.text().strip(),unverified=self.unverified.isChecked(),legacy=self.legacy.isChecked(),remote_path=self.remote_path.text().strip() or '.')
+        result.update(ssh_auth=self.ssh_auth.currentData() if p in ('SSH','SFTP','SCP') else 'auto',ssh_legacy=self.ssh_legacy.isChecked() if p in ('SSH','SFTP','SCP') else False)
         if p not in ('SSH','SFTP','SCP','FTP','FTPS'):result.update(user='',password='')
         if p not in ('SSH','SFTP','SCP') or not self.key_group.isChecked():result.update(passphrase='',key='',key_data='')
         if p not in ('Mitel TLS Telnet','FTPS'):result.update(ca='',unverified=False)
@@ -100,11 +113,14 @@ class Credentials(QWidget):
         self.protocol.setCurrentText(s.get('protocol','SSH'))
         for name in ('host','port','user','key','ca','password','passphrase'):getattr(self,name).setText(str(s.get(name,'')))
         self.key_data=s.get('key_data','');self.key_group.setChecked(bool(self.key.text() or self.key_data))
-        for name in ('unverified','legacy','open_files'):getattr(self,name).setChecked(bool(s.get(name,False)))
+        for name in ('unverified','legacy','open_files','ssh_legacy'):getattr(self,name).setChecked(bool(s.get(name,False)))
+        self.ssh_auth.setCurrentIndex(max(0,self.ssh_auth.findData(s.get('ssh_auth','auto'))))
         self.file_protocol.setCurrentText(s.get('file_protocol','SFTP'));self.file_port.setValue(int(s.get('file_port',s.get('port',22))))
         self.remote_path.setText(s.get('remote_path','.'));self.show_password.setChecked(False)
         self.credential_ref=s.get('credential_ref','')
     def confirm_tls(self,s):
+        if s['protocol'] in ('SSH','SFTP','SCP') and s.get('ssh_legacy'):
+            return QMessageBox.question(self,'Legacy SSH compatibility','This device will permit the supported older SSH choices (including SHA-1 key exchange/RSA, CBC ciphers and older MACs) for this connection. Host-key verification remains enabled. SSHv1 and unavailable removed algorithms are not enabled. Continue?')==QMessageBox.Yes
         if s['protocol'] not in ('Mitel TLS Telnet','FTPS') or not (s['unverified'] or s['legacy']):return True
         return QMessageBox.question(self,'TLS compatibility','This connection uses reduced TLS verification or legacy cryptography. Continue for this device?')==QMessageBox.Yes
 
@@ -213,6 +229,8 @@ class NetworkConsole(QWidget):
         self.last_settings={k:v for k,v in s.items() if k not in ('password','passphrase','key_data')}
         self.title_changed.emit(s.get('host') or 'Local terminal')
         self.worker = Session(s, self)
+        if hasattr(self.worker,'credential_requested'):
+            worker=self.worker;worker.credential_requested.connect(lambda title,prompt,secret:answer_credential(self,worker,title+' — '+s.get('host',''),prompt,secret))
         if hasattr(self,'local_browser'):self.worker.directory_changed.connect(self.local_browser.terminal_changed)
         self.worker.received.connect(self.receive); self.worker.sent.connect(lambda data: self.record('TX',data))
         if hasattr(self.worker,'secret_sent'):self.worker.secret_sent.connect(self.record_secret)
@@ -311,6 +329,7 @@ class FileBrowser(QWidget):
     def run(self, function, complete,failed=None):
         if self.task and self.task.isRunning(): return
         self.task = Task(function,self)
+        task=self.task;task.credential_requested.connect(lambda title,prompt,secret:answer_credential(self,task,title+' — '+self.credentials.host.text(),prompt,secret))
         self.task.question.connect(lambda title,text: self.task.respond(QMessageBox.question(self,title,text) == QMessageBox.Yes))
         self.task.progress.connect(self.progress.setValue)
         self.task.completed.connect(lambda result,error: self.complete(result,error,complete,failed))
@@ -345,7 +364,7 @@ class FileBrowser(QWidget):
         if not self.credentials.confirm_tls(s): return
         def connect(task):
             if s['protocol'] in ('SFTP','SCP'):
-                c = ssh_connect(s,task.ask)
+                c = ssh_connect(s,task.ask,task.request_credential)
                 try: r = c.open_sftp(); r.get_channel().settimeout(20)
                 except Exception: c.close(); raise
                 return s['protocol'],c,r

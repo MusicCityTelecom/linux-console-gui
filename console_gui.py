@@ -10,7 +10,7 @@ from PyQt5.QtGui import QColor, QFont, QTextCursor, QKeySequence, QPainter
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QFormLayout, QGroupBox, QComboBox, QPushButton, QLabel, QCheckBox, QPlainTextEdit,
     QLineEdit, QFileDialog, QMessageBox, QInputDialog, QSplitter, QDialog, QTableWidget,
-    QTableWidgetItem, QHeaderView, QShortcut, QScrollArea, QTabWidget, QSizePolicy, QToolButton, QTabBar)
+    QTableWidgetItem, QHeaderView, QShortcut, QScrollArea, QTabWidget, QSizePolicy, QToolButton, QTabBar,QSpinBox,QDoubleSpinBox)
 from credential_vault import CredentialVault, VaultError
 from profile_ui import SecurityMenu, unlock_vault, DeviceManager
 from ui_settings import ConsoleSettings, preferences, apply_palette
@@ -170,75 +170,73 @@ class Terminal(QPlainTextEdit):
 
 
 class Scanner(QThread):
-    sample = pyqtSignal(dict)
-    completed = pyqtSignal(list, str)
-
-    def __init__(self, settings):
-        super().__init__(); self.settings = settings
-
+    sample=pyqtSignal(dict)
+    completed=pyqtSignal(list,str)
+    stage=pyqtSignal(str)
+    def __init__(self,settings,**options):
+        super().__init__();self.settings=settings;self.options=options
     def run(self):
-        try:
-            result = scan_rates(self.settings, self.isInterruptionRequested, self.sample.emit)
-            self.completed.emit(result, '')
-        except Exception as e:
-            self.completed.emit([], str(e))
+        try:self.completed.emit(scan_rates(self.settings,self.isInterruptionRequested,self.sample.emit,status=self.stage.emit,**self.options),'')
+        except Exception as error:self.completed.emit([],str(error))
 
 
 class DetectionDialog(QDialog):
-    def __init__(self, settings, parent):
-        super().__init__(parent)
-        self.selected = None
-        self.setWindowTitle('Find a likely baud rate')
-        self.resize(760, 480)
-        layout = QVBoxLayout(self)
-        label = QLabel('Passive scan • about 20 seconds\nKeep the device transmitting. No probe bytes are sent. Opening the port may toggle DTR/RTS.\nUses the selected parity, data bits, and stop bits. Readability is a hint, not proof.')
-        label.setWordWrap(True); layout.addWidget(label)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(['Baud', 'Bytes', 'Readable', 'Sample'])
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        layout.addWidget(self.table)
-        self.status = QLabel('Listening…'); layout.addWidget(self.status)
-        row = QHBoxLayout(); layout.addLayout(row)
-        self.use = QPushButton('Use selected rate'); self.use.setEnabled(False)
-        self.stop = QPushButton('Cancel scan')
-        row.addStretch(); row.addWidget(self.use); row.addWidget(self.stop)
-        self.use.clicked.connect(self.choose); self.stop.clicked.connect(self.reject)
-        self.worker = Scanner(settings)
-        self.worker.sample.connect(self.add)
-        self.worker.completed.connect(self.done_scan)
-        self.worker.start()
-
-    def add(self, r):
-        i = self.table.rowCount(); self.table.insertRow(i)
-        for col, val in enumerate([r['baud'], r['count'], f"{r['score']:.0%}", r['preview'].replace('\r', ' ').replace('\n', ' ')]):
-            self.table.setItem(i, col, QTableWidgetItem(str(val)))
-        self.status.setText(f"Sampled {r['baud']:,} baud…")
-
-    def done_scan(self, results, error):
-        self.stop.setText('Close')
-        self.use.setEnabled(self.table.rowCount() > 0)
-        if error:
-            self.status.setText(error)
-        elif results and results[0]['count'] >= 16 and results[0]['score'] >= .85:
-            best = results[0]
-            self.status.setText(f"Candidate: {best['baud']:,} baud. Verify the sample, select a row, then connect to confirm.")
+    def __init__(self,settings,parent):
+        super().__init__(parent);self.settings=settings;self.selected=None;self.worker=None
+        self.setWindowTitle('Find a likely baud rate');screen=self.screen().availableGeometry();self.resize(min(760,screen.width()-30),min(580,screen.height()-50))
+        layout=QVBoxLayout(self)
+        label=QLabel('Listen first, then request a prompt if needed. Uses the selected parity, data bits, stop bits and flow control. Opening the port may toggle DTR/RTS. Verify readable samples before using a rate.');label.setWordWrap(True);layout.addWidget(label)
+        row=QHBoxLayout();layout.addLayout(row)
+        self.probe=QCheckBox('Send Enter if quiet');self.probe.setChecked(True);self.probe.setToolTip('Sends line endings only. An empty Enter can select a device menu default; uncheck for listen-only sampling.');row.addWidget(self.probe)
+        row.addWidget(QLabel('Up to'));self.count=QSpinBox();self.count.setRange(1,5);self.count.setValue(3);row.addWidget(self.count)
+        self.ending=QComboBox();self.ending.addItems(['CR','CRLF','LF']);row.addWidget(self.ending)
+        row=QHBoxLayout();layout.addLayout(row)
+        row.addWidget(QLabel('Between Enters'));self.interval=QDoubleSpinBox();self.interval.setRange(.1,3);self.interval.setSingleStep(.1);self.interval.setValue(.35);self.interval.setSuffix(' s');row.addWidget(self.interval)
+        row.addWidget(QLabel('Response wait'));self.wait=QDoubleSpinBox();self.wait.setRange(.3,10);self.wait.setSingleStep(.5);self.wait.setValue(1.4);self.wait.setSuffix(' s / rate');row.addWidget(self.wait)
+        self.table=QTableWidget(0,5);self.table.setHorizontalHeaderLabels(['Baud','Bytes','Readable','Enters','Sample']);self.table.horizontalHeader().setSectionResizeMode(4,QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows);self.table.setSelectionMode(QTableWidget.SingleSelection);self.table.setEditTriggers(QTableWidget.NoEditTriggers);layout.addWidget(self.table,1)
+        self.status=QLabel('Ready. Default scan takes about 30 seconds; choose Start scan.');self.status.setWordWrap(True);layout.addWidget(self.status)
+        row=QHBoxLayout();layout.addLayout(row);self.start=QPushButton('Start scan');self.use=QPushButton('Use selected rate');self.use.setEnabled(False);self.stop=QPushButton('Close')
+        for button in (self.start,self.use,self.stop):row.addWidget(button)
+        self.start.clicked.connect(self.start_scan);self.use.clicked.connect(self.choose);self.stop.clicked.connect(self.stop_or_close);self.table.itemSelectionChanged.connect(self.update_use)
+        self.probe.toggled.connect(self.probe_changed);self.probe_changed()
+    def probe_changed(self):
+        active=self.probe.isChecked()
+        for widget in (self.count,self.ending,self.interval):widget.setEnabled(active)
+    def start_scan(self):
+        if self.worker and self.worker.isRunning():return
+        self.table.setRowCount(0);self.use.setEnabled(False);self.start.setEnabled(False);self.stop.setText('Cancel scan')
+        options=dict(probe_count=self.count.value() if self.probe.isChecked() else 0,probe={'CR':b'\r','CRLF':b'\r\n','LF':b'\n'}[self.ending.currentText()],probe_interval=self.interval.value(),seconds=self.wait.value())
+        for widget in (self.probe,self.count,self.ending,self.interval,self.wait):widget.setEnabled(False)
+        self.worker=Scanner(self.settings,**options);self.worker.sample.connect(self.add);self.worker.stage.connect(self.status.setText);self.worker.completed.connect(self.done_scan);self.worker.finished.connect(self.update_use);self.worker.start()
+    def add(self,result):
+        row=self.table.rowCount();self.table.insertRow(row)
+        for col,value in enumerate((result['baud'],result['count'],f"{result['score']:.0%}",result['probes'],result['preview'].replace('\r',' ').replace('\n',' '))):
+            item=QTableWidgetItem(str(value));item.setData(Qt.UserRole,result);self.table.setItem(row,col,item)
+    def done_scan(self,results,error):
+        self.stop.setText('Close');self.start.setEnabled(True)
+        for widget in (self.probe,self.count,self.ending,self.interval,self.wait):widget.setEnabled(True)
+        self.probe_changed();candidates=[r for r in results if r.get('candidate')]
+        if error:self.status.setText(error)
+        elif self.worker and self.worker.isInterruptionRequested():self.status.setText('Scan cancelled. Partial samples remain available for review.')
+        elif candidates:
+            best=candidates[0]
+            self.status.setText((f"Likely rate: {best['baud']:,} baud. " if len(candidates)==1 else 'Several rates returned readable data. ')+ 'Review the samples and connect to confirm.')
             for row in range(self.table.rowCount()):
-                if self.table.item(row, 0).text() == str(best['baud']):
-                    self.table.selectRow(row)
-        else:
-            self.status.setText('No reliable candidate. Device may be silent or sending binary data.')
-
+                if self.table.item(row,0).text()==str(best['baud']):self.table.selectRow(row);break
+        else:self.status.setText('No clear response. Echoed Enter/blank lines are ignored. Try a longer response wait, different line ending, or check serial settings/cabling.')
+        self.update_use()
+    def update_use(self):
+        row=self.table.currentRow();item=self.table.item(row,0) if row>=0 else None
+        self.use.setEnabled(bool(item and item.data(Qt.UserRole).get('content_count',0)>0 and not (self.worker and self.worker.isRunning())))
     def choose(self):
-        row = self.table.currentRow()
-        if row >= 0:
-            self.selected = self.table.item(row, 0).text(); self.accept()
-
-    def done(self, result):
-        self.worker.requestInterruption()
-        self.worker.wait()
+        row=self.table.currentRow()
+        if row>=0 and self.use.isEnabled():self.selected=self.table.item(row,0).text();self.accept()
+    def stop_or_close(self):
+        if self.worker and self.worker.isRunning():self.worker.requestInterruption();self.status.setText('Cancelling…');return
+        self.reject()
+    def done(self,result):
+        if self.worker:self.worker.requestInterruption();self.worker.wait()
         super().done(result)
 
 

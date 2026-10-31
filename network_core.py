@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from platform_support import config_directory
 import paramiko
+from ssh_support import ConsoleSSHClient,transport_factory
 from PyQt5.QtCore import QThread, pyqtSignal
 
 CONFIG = config_directory()
@@ -103,29 +104,44 @@ class SharedSSH:
             if self._references==0: self.client.close()
 
 
-def ssh_connect(settings, ask):
-    c = paramiko.SSHClient()
+def ssh_connect(settings, ask,request_credential=None):
+    c = ConsoleSSHClient(settings,request_credential)
     c.load_system_host_keys()
     if (CONFIG / 'known_hosts').exists(): c.load_host_keys(str(CONFIG / 'known_hosts'))
     c.set_missing_host_key_policy(TrustPolicy(ask))
+    connected=False
     try:
         pkey=private_key_from_text(settings['key_data'],settings.get('passphrase') or settings.get('password')) if settings.get('key_data') else None
         c.connect(settings['host'], port=int(settings.get('port', 22)), username=settings.get('user') or None,
                   password=settings.get('password') or None, key_filename=(settings.get('key') or None) if not pkey else None, pkey=pkey,
                   passphrase=settings.get('passphrase') or settings.get('password') or None, timeout=10, banner_timeout=10, auth_timeout=15,
-                  allow_agent=True, look_for_keys=True)
+                  allow_agent=True, look_for_keys=True,transport_factory=transport_factory(settings,request_credential))
+        if not c.get_transport().is_authenticated():raise paramiko.AuthenticationException('SSH login did not complete.')
         c.get_transport().set_keepalive(30)
+        connected=True
         return c
-    except Exception:
-        c.close(); raise
+    except paramiko.AuthenticationException as error:
+        raise paramiko.AuthenticationException(str(error)+' Check the SSH username/password or login method; an authentication failure is separate from algorithm negotiation.') from error
+    finally:
+        transport=c.get_transport()
+        if transport and hasattr(transport,'login_password'):transport.login_password=None;transport.login_prompt=None
+        c.login_prompt=None
+        if not connected:c.close()
 
 
 class Task(QThread):
     completed = pyqtSignal(object, str)
     question = pyqtSignal(str, str)
     progress = pyqtSignal(int)
+    credential_requested=pyqtSignal(str,str,bool)
     def __init__(self, function, parent=None):
-        super().__init__(parent); self.function = function; self.answer = False; self.event = threading.Event()
+        super().__init__(parent); self.function = function; self.answer = False; self.event = threading.Event();self.credential_event=threading.Event();self.credential_answer=None
+    def request_credential(self,title,prompt,secret=True):
+        self.credential_event.clear();self.credential_answer=None;self.credential_requested.emit(title,prompt,secret)
+        while not self.credential_event.wait(.1):
+            if self.isInterruptionRequested():return None
+        answer=self.credential_answer;self.credential_answer=None;return answer
+    def respond_credential(self,answer):self.credential_answer=answer;self.credential_event.set()
     def ask(self, title, text):
         self.event.clear(); self.question.emit(title, text)
         while not self.event.wait(.1):
@@ -146,9 +162,17 @@ class Session(QThread):
     question = pyqtSignal(str, str)
     directory_changed = pyqtSignal(str)
     secret_sent = pyqtSignal(int)
+    credential_requested=pyqtSignal(str,str,bool)
     def __init__(self, settings, parent=None):
         super().__init__(parent); self.settings = settings; self.output = queue.Queue(maxsize=1024)
         self.event = threading.Event(); self.answer = False; self.dimensions = (120, 40); self.ssh_handle = None
+        self.credential_event=threading.Event();self.credential_answer=None
+    def request_credential(self,title,prompt,secret=True):
+        self.credential_event.clear();self.credential_answer=None;self.credential_requested.emit(title,prompt,secret)
+        while not self.credential_event.wait(.1):
+            if self.isInterruptionRequested():return None
+        answer=self.credential_answer;self.credential_answer=None;return answer
+    def respond_credential(self,answer):self.credential_answer=answer;self.credential_event.set()
     def ask(self, title, text):
         self.event.clear(); self.question.emit(title, text)
         while not self.event.wait(.1):
@@ -178,7 +202,7 @@ class Session(QThread):
                     start_new_session=True, env=dict(os.environ, TERM='vt100'), cwd=local_cwd)
                 os.close(slave)
             elif protocol == 'SSH':
-                client = ssh_connect(s, self.ask)
+                client = ssh_connect(s, self.ask,self.request_credential)
                 self.ssh_handle = SharedSSH(client)
                 channel = client.invoke_shell(term='vt100', width=120, height=40); channel.settimeout(.2)
             else:

@@ -31,7 +31,7 @@ if missing:
 version={}; exec((src/'version.py').read_text(),version)
 release=dest/('version-'+version['VERSION']); stage=dest/('staging-'+str(os.getpid()))
 stage.mkdir(parents=True)
-for name in ('console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','device_profiles.py','ui_settings.py','tftp_transfer.py','workspace.py','password_manager.py','session_import.py','command_reference.py','file_editing.py','local_browser.py','local_terminal.py','version.py','serial-desk.svg','LICENSE','README.md'):
+for name in ('console_gui.py','serial_core.py','network_core.py','network_ui.py','ssh_support.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','device_profiles.py','ui_settings.py','tftp_transfer.py','workspace.py','password_manager.py','session_import.py','command_reference.py','file_editing.py','local_browser.py','local_terminal.py','version.py','serial-desk.svg','LICENSE','README.md'):
     shutil.copy2(src/name,stage/name)
 (stage/'INSTALL_MODE').write_text('source\n')
 # Only custom-prefix installs need this marker; default XDG installations retain existing behavior.

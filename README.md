@@ -16,8 +16,8 @@ A native Linux and Windows desktop toolkit for serial consoles, network maintena
 - **Visible console focus:** blinking block/bar cursor at the remote insertion point, mint focus borders, keyboard-focus hints and configurable interface/console fonts, blink and scrollback under **Settings → Console appearance**.
 
 - **Serial console:** detected ports (USB adapters first), editable device paths, custom baud, data bits, parity, stop bits, software/hardware flow control, initial DTR/RTS states, text and hexadecimal sending, Ctrl+C, break, copy/paste, RX/TX counters, profiles and session logging.
-- **Baud scan:** passive sampling of common rates from 300 through 921600. Needs a device transmitting repeated readable text; candidates must be verified. Binary or silent devices cannot be reliably detected.
-- **SSH / Telnet:** interactive SSH, Telnet, and Mitel SSL/TLS Telnet on port **2000**. SSH keys/agent/passwords are supported. Unknown SSH fingerprints require confirmation; changed known keys are rejected. Saved profiles can optionally retain passwords, key passphrases and encrypted private-key copies in the credential vault.
+- **Baud scan:** samples common rates from 300 through 921600 and listens before transmitting. When a quiet device needs a prompt, choose up to five spaced Enter probes (CR, LF or CRLF) in the scan dialog; listen-only remains available. Candidates must be verified, and binary or silent devices still cannot be reliably detected.
+- **SSH / Telnet:** interactive SSH, Telnet, and Mitel SSL/TLS Telnet on port **2000**. SSH keys/agent/passwords and keyboard-interactive device prompts are supported. Unknown SSH fingerprints require confirmation; changed known keys are rejected. A per-device, confirmed **Legacy SSH algorithms** option adds supported old Cisco-era SHA-1/DH, RSA/DSA, CBC and HMAC choices without disabling host-key verification or enabling SSHv1. Saved profiles can optionally retain passwords, key passphrases and encrypted private-key copies in the credential vault.
 - **Session tabs:** open multiple serial, SSH/Telnet, local-terminal and file-browser sessions. Drag tabs to reorder; double-click a title to rename; close sessions independently. Ctrl+T opens a new network tab; the + menu offers every session type. Duplicate a connection tab and search its console output.
 - **Remote File Manager:** browse SFTP, SCP, FTP and explicit FTPS servers; upload/download individual or multiple files, drag local files into the browser to upload, create folders and rename. On an authenticated SSH tab, click **SFTP ↗** or **SCP ↗** to open a new browser tab using the existing connection without another login. File tabs retain their own channel and can continue after the shell tab closes. Folder transfers are not supported. SCP mode browses using SFTP and transfers through the legacy SCP protocol, so browsing requires SFTP support on the server.
 - **Notepad:** local scratchpad saved automatically, with open and save-copy actions.
@@ -29,7 +29,7 @@ The terminal handles basic cursor/erase sequences and UTF-8 text. It is a mainte
 
 ## Windows version
 
-Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.5.1). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
+Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.5.2). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
 
 See [Windows installation, source and build instructions](docs/WINDOWS.md). The Windows local terminal runs Command Prompt, COM ports use Windows names, and local credential keys use Windows DPAPI. Startup update checks select the matching Windows release channel.
 
@@ -38,7 +38,7 @@ See [Windows installation, source and build instructions](docs/WINDOWS.md). The 
 For **Ubuntu 24.04+ / Debian 13+** with Python 3.12 or newer:
 
 ```sh
-sudo apt install ./serial-desk_1.5.1_all.deb
+sudo apt install ./serial-desk_1.5.2_all.deb
 serial-desk
 ```
 

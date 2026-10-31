@@ -10,7 +10,7 @@ from tftp_transfer import TFTPTransfer
 from device_profiles import for_context
 
 PUBLIC_FIELDS=('protocol','host','port','user','key','ca','unverified','legacy','remote_path',
-               'open_files','file_protocol','file_port','credential_ref','local_cwd','local_folder','follow_terminal','show_hidden')
+               'open_files','file_protocol','file_port','credential_ref','local_cwd','local_folder','follow_terminal','show_hidden','ssh_auth','ssh_legacy')
 DEFAULT_OPTIONS=dict(save=True,policy='ask',reconnect=False,geometry=True)
 
 

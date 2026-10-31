@@ -1,14 +1,14 @@
 # Serial Desk for Windows
 
-Version **1.5.1** adds a local file pane that follows Command Prompt's directory, local/remote text editing, terminal Tab/Shift+Tab handling, live-output scrolling on Enter, and a saved-profile password-paste button with outgoing-log redaction. It also includes encrypted workspace restoration, the F1 offline command reference, the password manager and reviewed imports. See the [import format guide](IMPORTS.md) for supported fields and limitations. Existing client-encrypted passwords and PuTTY PPK files are not automatically converted or decrypted.
+Version **1.5.2** adds listen-first baud scanning with optional spaced Enter prompts for quiet equipment, SSH password/device-prompt dialogs, and a per-device legacy SSH compatibility option for older equipment. It also includes the local file pane that follows Command Prompt's directory, local/remote text editing, terminal Tab/Shift+Tab handling, live-output scrolling on Enter, encrypted workspace restoration, the F1 offline command reference, the password manager and reviewed imports. See the [import format guide](IMPORTS.md) for supported fields and limitations. Existing client-encrypted passwords and PuTTY PPK files are not automatically converted or decrypted.
 
 Windows 10 (1809 or later) / Windows 11, **x64**. ARM64-native and 32-bit builds are not provided. The same Python application source supports both Windows and Linux.
 
 ## Downloads
 
-- **`SerialDesk-1.5.1-windows-x64-setup.exe`** — recommended per-user installer. Python is bundled; no separate Python installation is needed. Installs in your Local AppData Programs directory and creates a Start-menu shortcut. A desktop shortcut is optional.
-- **`SerialDesk-1.5.1-windows-x64-portable.zip`** — extract the entire ZIP into a writable folder and open `SerialDesk.exe`. Keep `_internal` and the other files alongside the executable. “Portable” refers to the application files; profiles and notes still live in your Windows account's AppData directory.
-- **`serial-desk-1.5.1-windows-source.zip`** — full shared application source, tests, build scripts and Windows installation instructions.
+- **`SerialDesk-1.5.2-windows-x64-setup.exe`** — recommended per-user installer. Python is bundled; no separate Python installation is needed. Installs in your Local AppData Programs directory and creates a Start-menu shortcut. A desktop shortcut is optional.
+- **`SerialDesk-1.5.2-windows-x64-portable.zip`** — extract the entire ZIP into a writable folder and open `SerialDesk.exe`. Keep `_internal` and the other files alongside the executable. “Portable” refers to the application files; profiles and notes still live in your Windows account's AppData directory.
+- **`serial-desk-1.5.2-windows-source.zip`** — full shared application source, tests, build scripts and Windows installation instructions.
 - **`SHA256SUMS`** — SHA-256 checksums for the downloads.
 
 This initial Windows build is not Authenticode-signed. Windows may show an unknown-publisher warning. Verify the download source and checksum before running it; do not disable Windows security protections globally.
@@ -17,7 +17,7 @@ This initial Windows build is not Authenticode-signed. Windows may show an unkno
 
 Saved devices are shared between SSH and the Remote File Manager, with group/search filters and optional companion file-service tabs. Console focus has a visible blinking cursor, with appearance options under Settings. TFTP is a separate filename-based transfer tool, not a directory browser.
 
-Detected serial devices use COM names such as `COM3`. Install your adapter's Windows driver if no ports appear. Serial settings, SSH/Telnet/Mitel TLS sessions, SFTP/SCP/FTP/FTPS transfers, tabs, profiles, notepad and master-password protection work through the shared UI. SFTP/SCP upload/download are available through the file-browser buttons; the SFTP and SCP buttons on SSH tabs reuse that authenticated connection.
+Detected serial devices use COM names such as `COM3`. Install your adapter's Windows driver if no ports appear. For quiet serial equipment, baud discovery listens first and can send a configurable number of spaced Enter line endings to request a prompt. Serial settings, SSH/Telnet/Mitel TLS sessions, SFTP/SCP/FTP/FTPS transfers, tabs, profiles, notepad and master-password protection work through the shared UI. SFTP/SCP upload/download are available through the file-browser buttons; the SFTP and SCP buttons on SSH tabs reuse that authenticated connection. For older SSH equipment, choose **Legacy SSH algorithms** in that device's settings and confirm the warning; host fingerprints are still checked, and SSHv1 is not supported.
 
 The local terminal runs Windows Command Prompt through a Windows pseudo-terminal. Commands such as `ping`, `ipconfig`, `tracert`, `nslookup` and installed command-line tools are available. Full-screen terminal programs and ANSI colors have the same limitations as the Linux console.
 

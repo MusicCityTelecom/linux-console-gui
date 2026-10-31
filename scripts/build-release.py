@@ -12,7 +12,7 @@ import tempfile
 ROOT=Path(__file__).resolve().parent.parent
 scope={}; exec((ROOT/'version.py').read_text(),scope); version=scope['VERSION']
 DIST=ROOT/'dist'; DIST.mkdir(exist_ok=True)
-FILES=['console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','device_profiles.py','ui_settings.py','tftp_transfer.py','workspace.py','password_manager.py','session_import.py','command_reference.py','file_editing.py','local_browser.py','local_terminal.py','version.py','serial-desk.svg','README.md','LICENSE']
+FILES=['console_gui.py','serial_core.py','network_core.py','network_ui.py','ssh_support.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','device_profiles.py','ui_settings.py','tftp_transfer.py','workspace.py','password_manager.py','session_import.py','command_reference.py','file_editing.py','local_browser.py','local_terminal.py','version.py','serial-desk.svg','README.md','LICENSE']
 with tempfile.TemporaryDirectory() as tmp:
     base=Path(tmp); package=base/'package'; app=package/'usr/share/serial-desk'; app.mkdir(parents=True)
     for name in FILES: shutil.copy2(ROOT/name,app/name)
@@ -38,7 +38,7 @@ Description: Serial and network console toolkit
 archive=DIST/f'serial-desk-{version}.tar.gz'
 # Explicit allowlist excludes local notes, credentials, build output and reference software.
 with tarfile.open(archive,'w:gz') as tar:
-    for name in FILES+['install-source.sh','requirements.txt','CHANGELOG.md','test_serial_desk.py','test_network.py','test_session_features.py','test_windows.py','test_device_workflow.py','test_workspace_import.py','test_file_editing.py','docs/IMPORTS.md','requirements-windows.txt','install-source.ps1','launch-windows.bat','scripts/build-windows.py','scripts/windows-installer.iss','docs/WINDOWS.md','.github/workflows/windows-release.yml','scripts/build-release.py','.github/workflows/ci.yml','.github/workflows/release.yml','.gitignore']:
+    for name in FILES+['install-source.sh','requirements.txt','CHANGELOG.md','test_serial_desk.py','test_network.py','test_session_features.py','test_windows.py','test_device_workflow.py','test_workspace_import.py','test_file_editing.py','test_connection_compat.py','docs/IMPORTS.md','requirements-windows.txt','install-source.ps1','launch-windows.bat','scripts/build-windows.py','scripts/windows-installer.iss','docs/WINDOWS.md','.github/workflows/windows-release.yml','scripts/build-release.py','.github/workflows/ci.yml','.github/workflows/release.yml','.gitignore']:
         tar.add(ROOT/name,arcname=f'serial-desk-{version}/{name}')
 with (DIST/'SHA256SUMS').open('w') as f:
     for path in (DIST/f'serial-desk_{version}_all.deb',archive): f.write(hashlib.sha256(path.read_bytes()).hexdigest()+'  '+path.name+'\n')

@@ -13,9 +13,9 @@ import zipfile
 ROOT=Path(__file__).resolve().parent.parent
 scope={};exec((ROOT/'version.py').read_text(),scope);VERSION=scope['VERSION']
 SOURCE_FILES=[
- 'console_gui.py','serial_core.py','network_core.py','network_ui.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','device_profiles.py','ui_settings.py','tftp_transfer.py','workspace.py','password_manager.py','session_import.py','command_reference.py','file_editing.py','local_browser.py','local_terminal.py','version.py',
+ 'console_gui.py','serial_core.py','network_core.py','network_ui.py','ssh_support.py','updates.py','credential_vault.py','profile_ui.py','platform_support.py','device_profiles.py','ui_settings.py','tftp_transfer.py','workspace.py','password_manager.py','session_import.py','command_reference.py','file_editing.py','local_browser.py','local_terminal.py','version.py',
  'serial-desk.svg','README.md','LICENSE','CHANGELOG.md','requirements.txt','requirements-windows.txt','install-source.ps1','launch-windows.bat','install-source.sh','launch.sh','serial-desk.desktop',
- 'test_serial_desk.py','test_network.py','test_session_features.py','test_windows.py','test_device_workflow.py','test_workspace_import.py','test_file_editing.py','docs/IMPORTS.md','docs/WINDOWS.md','scripts/build-windows.py','scripts/build-release.py','scripts/windows-installer.iss',
+ 'test_serial_desk.py','test_network.py','test_session_features.py','test_windows.py','test_device_workflow.py','test_workspace_import.py','test_file_editing.py','test_connection_compat.py','docs/IMPORTS.md','docs/WINDOWS.md','scripts/build-windows.py','scripts/build-release.py','scripts/windows-installer.iss',
  '.github/workflows/ci.yml','.github/workflows/release.yml','.github/workflows/windows-release.yml','.gitignore',
 ]
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.2 — 2026-10-31
+
+- Make baud-rate discovery listen before sending anything, then optionally send up to five spaced Enter line endings at each rate to wake quiet console prompts. CR, LF or CRLF, timing and probe count are explicit scan controls; echoed blank lines are never treated as a baud candidate.
+- Add per-device SSH authentication selection (automatic, password, keyboard-interactive/device prompts, or key/agent) and desktop-safe credential prompts. Missing passwords now request credentials instead of ending with an unhelpful “No authentication methods available” message; multi-step device logins can request a one-time code.
+- Add an explicitly confirmed **Legacy SSH algorithms** setting for older devices such as Cisco switches. Where the bundled SSH library supports them, it allows SHA-1 Diffie-Hellman, ssh-rsa/ssh-dss, CBC and older HMAC negotiation for that device only; host-key verification remains required and SSHv1 is never enabled.
+- Add regression coverage for prompted baud scans, cancellation and echo rejection, SSH password/device prompts, old-only algorithm negotiation, RSA authentication and changed-host-key rejection. Update Linux and Windows source/package manifests.
+
 ## 1.5.1 — 2026-10-31
 
 - Preserve Windows owner/group/access rules on staged local text saves before writing contents, then use native file replacement with a recovery backup. Do not ignore permission-merge failures.
