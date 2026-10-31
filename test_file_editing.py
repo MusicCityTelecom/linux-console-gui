@@ -49,7 +49,13 @@ class TextFileTests(unittest.TestCase):
             self.assertTrue(api.ConvertStringSecurityDescriptorToSecurityDescriptorW('D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)',1,c.byref(descriptor),None))
             try:self.assertTrue(api.SetFileSecurityW(str(path),0x80000004,descriptor))
             finally:kernel.LocalFree(descriptor)
-            original=security(path);save_local(read_local(path),b'new private text');self.assertEqual(security(path),original);self.assertEqual(path.read_bytes(),b'new private text');self.assertFalse(list(Path(d).glob('.serial-desk-*')))
+            original=security(path);save_local(read_local(path),b'new private text');updated=security(path)
+            # Windows can add the AI bookkeeping flag while keeping a protected
+            # DACL and every access rule unchanged. Compare security semantics.
+            owner_group,old_dacl=original.split('D:',1);new_owner_group,new_dacl=updated.split('D:',1)
+            old_flags,old_rules=old_dacl.split('(',1);new_flags,new_rules=new_dacl.split('(',1)
+            self.assertEqual(new_owner_group,owner_group);self.assertEqual(new_rules,old_rules);self.assertEqual('P' in new_flags,'P' in old_flags)
+            self.assertEqual(path.read_bytes(),b'new private text');self.assertFalse(list(Path(d).glob('.serial-desk-*')))
     def test_encodings_bom_and_line_endings_round_trip(self):
         for encoding in ('UTF-8','UTF-8 BOM','UTF-16 LE','UTF-16 BE','Windows-1252'):
             for newline in ('LF','CRLF','CR'):
