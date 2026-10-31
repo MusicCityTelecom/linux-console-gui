@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1 — 2026-10-31
+
+- Preserve Windows owner/group/access rules on staged local text saves before writing contents, then use native file replacement with a recovery backup. Do not ignore permission-merge failures.
+- Correct Windows short/long-path assumptions and SFTP POSIX-path handling in test fixtures; verify the native Windows directory tracker and terminal behavior alongside the complete suite.
+- Add a native Windows private-file access-rule preservation test.
+
 ## 1.5.0 — 2026-10-31
 
 - Replace the empty local-terminal sidebar with a local filesystem pane that follows shell directory changes on Linux and Windows, with independent browsing, history, hidden-file/filter controls, creation/rename, path copying, quoted-command insertion and Ctrl+B visibility.

@@ -62,6 +62,44 @@ def read_local(path):
     return dict(path=str(original),target=str(target),data=data,hash=digest(data),identity=(attributes.st_dev,attributes.st_ino),attributes=attributes)
 
 
+def windows_copy_security(source,destination):
+    """Apply the existing owner/group/DACL before writing any staged contents."""
+    import ctypes as c
+    from ctypes import wintypes as w
+    api=c.WinDLL('advapi32',use_last_error=True)
+    api.GetFileSecurityW.argtypes=[w.LPCWSTR,w.DWORD,c.c_void_p,w.DWORD,c.POINTER(w.DWORD)];api.GetFileSecurityW.restype=w.BOOL
+    api.SetFileSecurityW.argtypes=[w.LPCWSTR,w.DWORD,c.c_void_p];api.SetFileSecurityW.restype=w.BOOL
+    api.GetSecurityDescriptorControl.argtypes=[c.c_void_p,c.POINTER(w.WORD),c.POINTER(w.DWORD)];api.GetSecurityDescriptorControl.restype=w.BOOL
+    size=w.DWORD();api.GetFileSecurityW(str(source),7,None,0,c.byref(size))
+    if not size.value:raise c.WinError(c.get_last_error())
+    descriptor=c.create_string_buffer(size.value)
+    if not api.GetFileSecurityW(str(source),7,descriptor,size,c.byref(size)):raise c.WinError(c.get_last_error())
+    control=w.WORD();revision=w.DWORD()
+    if not api.GetSecurityDescriptorControl(descriptor,c.byref(control),c.byref(revision)):raise c.WinError(c.get_last_error())
+    flags=7|(0x80000000 if control.value&0x1000 else 0x20000000)
+    if not api.SetFileSecurityW(str(destination),flags,descriptor):raise c.WinError(c.get_last_error())
+
+
+def replace_file(source,target):
+    if os.name!='nt':os.replace(source,target);return ''
+    import ctypes as c
+    from ctypes import wintypes as w
+    kernel=c.WinDLL('kernel32',use_last_error=True)
+    kernel.ReplaceFileW.argtypes=[w.LPCWSTR,w.LPCWSTR,w.LPCWSTR,w.DWORD,c.c_void_p,c.c_void_p];kernel.ReplaceFileW.restype=w.BOOL
+    backup=Path(target).with_name('.serial-desk-backup-'+uuid.uuid4().hex)
+    if not kernel.ReplaceFileW(str(target),str(source),str(backup),0,None,None):
+        error=c.WinError(c.get_last_error())
+        if backup.exists():
+            if not Path(target).exists():
+                try:backup.rename(target)
+                except OSError:pass
+            if backup.exists():raise OSError(str(error)+' Original file retained at '+str(backup)) from error
+        raise error
+    try:backup.unlink()
+    except OSError:return 'Saved. Previous version remains at '+str(backup)
+    return ''
+
+
 def save_local(snapshot,data):
     if len(data)>MAX_TEXT:raise ValueError('File exceeds the 2 MiB editor limit.')
     current=read_local(snapshot['path'])
@@ -71,6 +109,7 @@ def save_local(snapshot,data):
     try:
         with os.fdopen(fd,'wb') as output:
             attrs=current['attributes'];created=os.fstat(output.fileno())
+            if os.name=='nt':windows_copy_security(target,name)
             if hasattr(os,'fchown') and (created.st_uid,created.st_gid)!=(attrs.st_uid,attrs.st_gid):os.fchown(output.fileno(),attrs.st_uid,attrs.st_gid)
             output.write(data);output.flush();os.fsync(output.fileno())
             os.chmod(name,stat.S_IMODE(attrs.st_mode))
@@ -78,9 +117,14 @@ def save_local(snapshot,data):
                 for key in os.listxattr(target):os.setxattr(name,key,os.getxattr(target,key))
         latest=read_local(snapshot['path'])
         if any(latest[key]!=current[key] for key in ('target','hash','identity')) or (latest['attributes'].st_mode,latest['attributes'].st_uid,latest['attributes'].st_gid)!=(attrs.st_mode,attrs.st_uid,attrs.st_gid):raise FileConflict('The file or its permissions changed while saving. Your edits have not replaced it.')
-        os.replace(name,target)
-    finally:Path(name).unlink(missing_ok=True)
-    return read_local(snapshot['path'])
+        warning=replace_file(name,target)
+    finally:
+        temporary=Path(name)
+        if temporary.exists():
+            try:temporary.chmod(0o600)
+            except OSError:pass
+            temporary.unlink(missing_ok=True)
+    result=read_local(snapshot['path']);result['warning']=warning;return result
 
 
 class RemoteTextStore:

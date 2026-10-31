@@ -67,7 +67,7 @@ class VaultTests(unittest.TestCase):
 class LocalSSHServer:
     """Real SSH/SFTP/SCP test peer rooted in a temporary directory."""
     def __init__(self,root):
-        self.root=Path(root); self.key=paramiko.RSAKey.generate(2048);self.stop=threading.Event();self.transport=None;self.logins=0
+        self.root=Path(root).resolve(); self.key=paramiko.RSAKey.generate(2048);self.stop=threading.Event();self.transport=None;self.logins=0
         self.listener=socket.socket();self.listener.bind(('127.0.0.1',0));self.listener.listen();self.port=self.listener.getsockname()[1]
         self.thread=threading.Thread(target=self.serve,daemon=True);self.thread.start()
     def serve(self):
@@ -77,7 +77,7 @@ class LocalSSHServer:
                 p=(outer.root/path.lstrip('/')).resolve()
                 if not p.is_relative_to(outer.root.resolve()):raise OSError('Outside test root')
                 return p
-            def canonicalize(self,path): return '/'+str(self.local(path).relative_to(outer.root)) if path!='.' else '/'
+            def canonicalize(self,path): return '/'+self.local(path).relative_to(outer.root).as_posix() if path!='.' else '/'
             def list_folder(self,path):
                 result=[]
                 for p in self.local(path).iterdir():

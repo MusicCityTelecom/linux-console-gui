@@ -29,7 +29,7 @@ The terminal handles basic cursor/erase sequences and UTF-8 text. It is a mainte
 
 ## Windows version
 
-Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.5.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
+Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.5.1). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
 
 See [Windows installation, source and build instructions](docs/WINDOWS.md). The Windows local terminal runs Command Prompt, COM ports use Windows names, and local credential keys use Windows DPAPI. Startup update checks select the matching Windows release channel.
 
@@ -38,7 +38,7 @@ See [Windows installation, source and build instructions](docs/WINDOWS.md). The 
 For **Ubuntu 24.04+ / Debian 13+** with Python 3.12 or newer:
 
 ```sh
-sudo apt install ./serial-desk_1.5.0_all.deb
+sudo apt install ./serial-desk_1.5.1_all.deb
 serial-desk
 ```
 
@@ -132,7 +132,7 @@ Double-click folders to browse and text files to edit. **New…** creates a text
 
 The editor handles regular text files up to **2 MiB**. Existing UTF-8/UTF-16 BOMs and uniform LF/CRLF/CR endings are retained. Select Windows-1252 explicitly with **Open with encoding** for legacy text. Mixed line endings need an explicit format choice before saving. Control/binary data and special Unicode line separators are rejected. **Ctrl+S** saves, **Ctrl+Shift+S** saves a local copy, **Ctrl+F** finds, and **Ctrl+W** closes the editor. Saving a copy leaves the original buffer marked unsaved. There is no automatic upload or text-file autosave.
 
-Local saves use a same-folder temporary file and replacement, preserve permissions/ownership and available extended attributes, and preserve symlink targets. Files with multiple hard links require a copy. Conflicting external content/identity changes leave the original untouched and your edits available for reload or a separate copy. File permissions still apply; the editor does not elevate privileges.
+Local saves use a same-folder temporary file and replacement, preserve permissions/ownership and available extended attributes, and preserve symlink targets. Windows applies the original access rules before staging contents and uses native replacement with a recovery backup. Files with multiple hard links require a copy. Conflicting external content/identity changes leave the original untouched and your edits available for reload or a separate copy. File permissions still apply; the editor does not elevate privileges.
 
 Remote SFTP and SCP-mode editing uses the existing SFTP channel. It preserves reported owner/group/mode, prefers the server's atomic POSIX rename extension, and otherwise uses a backup/rename sequence with rollback. FTP/FTPS direct saves require regular-file permission metadata and `SITE CHMOD` support; servers without those capabilities can still open text and save local copies for manual upload. Remote backups are retained and reported if cleanup/rollback cannot finish. A backup/rename fallback has a brief replacement gap, and remote metadata/ACL capabilities depend on the server. No remote shell commands are used for file editing.
 

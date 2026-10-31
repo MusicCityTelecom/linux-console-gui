@@ -28,6 +28,28 @@ from test_session_features import LocalSSHServer
 
 
 class TextFileTests(unittest.TestCase):
+    @unittest.skipUnless(os.name=='nt','Native Windows file access rules')
+    def test_windows_private_access_rules_survive_save(self):
+        import ctypes as c
+        from ctypes import wintypes as w
+        api=c.WinDLL('advapi32',use_last_error=True);kernel=c.WinDLL('kernel32',use_last_error=True)
+        api.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes=[w.LPCWSTR,w.DWORD,c.POINTER(c.c_void_p),c.POINTER(w.DWORD)];api.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype=w.BOOL
+        api.SetFileSecurityW.argtypes=[w.LPCWSTR,w.DWORD,c.c_void_p];api.SetFileSecurityW.restype=w.BOOL
+        api.GetFileSecurityW.argtypes=[w.LPCWSTR,w.DWORD,c.c_void_p,w.DWORD,c.POINTER(w.DWORD)];api.GetFileSecurityW.restype=w.BOOL
+        api.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes=[c.c_void_p,w.DWORD,w.DWORD,c.POINTER(c.c_void_p),c.POINTER(w.DWORD)];api.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype=w.BOOL
+        kernel.LocalFree.argtypes=[c.c_void_p];kernel.LocalFree.restype=c.c_void_p
+        def security(path):
+            size=w.DWORD();api.GetFileSecurityW(str(path),7,None,0,c.byref(size));buffer=c.create_string_buffer(size.value)
+            self.assertTrue(api.GetFileSecurityW(str(path),7,buffer,size,c.byref(size)))
+            text=c.c_void_p();self.assertTrue(api.ConvertSecurityDescriptorToStringSecurityDescriptorW(buffer,1,7,c.byref(text),None))
+            try:return c.wstring_at(text)
+            finally:kernel.LocalFree(text)
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private.txt';path.write_bytes(b'old');descriptor=c.c_void_p()
+            self.assertTrue(api.ConvertStringSecurityDescriptorToSecurityDescriptorW('D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)',1,c.byref(descriptor),None))
+            try:self.assertTrue(api.SetFileSecurityW(str(path),0x80000004,descriptor))
+            finally:kernel.LocalFree(descriptor)
+            original=security(path);save_local(read_local(path),b'new private text');self.assertEqual(security(path),original);self.assertEqual(path.read_bytes(),b'new private text');self.assertFalse(list(Path(d).glob('.serial-desk-*')))
     def test_encodings_bom_and_line_endings_round_trip(self):
         for encoding in ('UTF-8','UTF-8 BOM','UTF-16 LE','UTF-16 BE','Windows-1252'):
             for newline in ('LF','CRLF','CR'):
@@ -51,7 +73,7 @@ class TextFileTests(unittest.TestCase):
     def test_local_failed_replace_preserves_original(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'file.txt';path.write_bytes(b'original');snapshot=read_local(path)
-            with patch('file_editing.os.replace',side_effect=OSError('injected failure')):
+            with patch('file_editing.replace_file',side_effect=OSError('injected failure')):
                 with self.assertRaises(OSError):save_local(snapshot,b'edited')
             self.assertEqual(path.read_bytes(),b'original');self.assertEqual(list(Path(d).glob('.serial-desk-edit-*')),[])
     @unittest.skipIf(os.name=='nt','POSIX symlinks and hard links')
@@ -113,14 +135,14 @@ class FTPTextTests(unittest.TestCase):
 class LocalPaneTests(unittest.TestCase):
     def test_follow_pause_browse_and_settings(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d);a=root/'a';b=root/'b';a.mkdir();b.mkdir();pane=LocalBrowser();pane.terminal_changed(str(a));self.assertEqual(pane.directory,str(a))
+            root=Path(d).resolve();a=root/'a';b=root/'b';a.mkdir();b.mkdir();pane=LocalBrowser();pane.terminal_changed(str(a));self.assertEqual(pane.directory,str(a))
             pane.navigate(str(b));self.assertFalse(pane.follow.isChecked());pane.terminal_changed(str(root));self.assertEqual(pane.directory,str(b))
             pane.follow.setChecked(True);self.assertEqual(pane.directory,str(root));pane.hidden.setChecked(True)
             other=LocalBrowser();other.apply(pane.settings());self.assertEqual(other.directory,pane.directory);self.assertTrue(other.hidden.isChecked());pane.deleteLater();other.deleteLater();APP.processEvents()
     def test_path_insertion_is_quoted_and_never_sent(self):
         with tempfile.TemporaryDirectory(prefix="console space's ") as d:
             pane=LocalBrowser();pane.navigate(d);commands=[];pane.command_requested.connect(commands.append);pane.insert_path(True)
-            self.assertEqual(commands,[('cd /d ' if os.name=='nt' else 'cd -- ')+quoted_path(d)])
+            self.assertEqual(commands,[('cd /d ' if os.name=='nt' else 'cd -- ')+quoted_path(str(Path(d).resolve()))])
             with self.assertRaises(ValueError):quoted_path('bad\npath')
             pane.deleteLater();APP.processEvents()
     def test_unsaved_editor_close_cancel_and_save(self):
@@ -130,7 +152,7 @@ class LocalPaneTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(),b'old');self.assertTrue(editor.text.document().isModified());editor.save();self.assertEqual(path.read_bytes(),b'new');self.assertTrue(pane.prepare_close());pane.deleteLater();APP.processEvents()
     def test_workspace_restores_local_folders_without_starting_shell(self):
         with tempfile.TemporaryDirectory() as d,patch.dict(os.environ,XDG_CONFIG_HOME=d),patch('network_ui.CONFIG',Path(d)):
-            root=Path(d);folder=root/'browse';folder.mkdir();vault=CredentialVault(root/'vault');w=Window(vault,check_updates=False,restore_workspace=False)
+            root=Path(d).resolve();folder=root/'browse';folder.mkdir();vault=CredentialVault(root/'vault');w=Window(vault,check_updates=False,restore_workspace=False)
             try:
                 w.local.local_browser.terminal_changed(str(root));w.local.local_browser.navigate(str(folder));w.local.local_browser.hidden.setChecked(True);snapshot=w.workspace.snapshot()
                 with patch('network_ui.Session') as connect:w.workspace.restore(snapshot,False);connect.assert_not_called()
@@ -215,7 +237,7 @@ class SSHKeyboardTests(unittest.TestCase):
 
 class SFTPTextTests(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.server=LocalSSHServer(self.root);self.patch=patch('network_core.CONFIG',self.root/'known-host-config');self.patch.start()
+        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name).resolve();self.server=LocalSSHServer(self.root);self.patch=patch('network_core.CONFIG',self.root/'known-host-config');self.patch.start()
         self.client=ssh_connect(dict(host='127.0.0.1',port=self.server.port,user='test',password='test'),lambda *_:True);self.sftp=self.client.open_sftp();self.store=RemoteTextStore(self.sftp)
     def tearDown(self):self.sftp.close();self.client.close();self.server.close();self.patch.stop();self.temp.cleanup()
     def test_real_sftp_atomic_save_and_conflict(self):
