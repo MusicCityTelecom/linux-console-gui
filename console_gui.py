@@ -2,6 +2,7 @@
 """Serial Desk — a local serial console."""
 import codecs
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -23,9 +24,20 @@ from updates import UpdateController
 from serial_core import BAUDS, DEFAULTS, ProfileStore, open_port, ports, scan_rates, validate_settings
 
 
+def private_append(path):
+    """Open a session log with owner-only permissions on platforms that support them."""
+    fd=os.open(path,os.O_WRONLY|os.O_APPEND|os.O_CREAT,0o600)
+    try:
+        if os.name=='posix':os.chmod(path,0o600)
+        return os.fdopen(fd,'a',encoding='utf-8')
+    except Exception:
+        os.close(fd);raise
+
+
 class Terminal(QPlainTextEdit):
     outgoing = pyqtSignal(bytes)
     focus_changed=pyqtSignal(bool)
+    dimensions_changed=pyqtSignal(int,int)
 
     def __init__(self):
         super().__init__()
@@ -37,6 +49,7 @@ class Terminal(QPlainTextEdit):
         self.escape = ''
         self.escape_mode = False
         self.saved_position = 0
+        self._reported_dimensions=None
         self.session_active=False;self.caret_phase=True
         self.caret_timer=QTimer(self);self.caret_timer.setInterval(500);self.caret_timer.timeout.connect(self.blink_caret)
         self.apply_preferences()
@@ -44,7 +57,15 @@ class Terminal(QPlainTextEdit):
 
     def apply_preferences(self):
         p=preferences();font=self.font();font.setPointSize(p['font']);self.setFont(font);self.setMaximumBlockCount(p['scrollback'])
-        self.blink_enabled=p['blink'];self.cursor_shape=p['shape'];self.viewport().update()
+        self.blink_enabled=p['blink'];self.cursor_shape=p['shape'];self.viewport().update();self.report_dimensions()
+    def terminal_dimensions(self):
+        cell_width=max(1,self.fontMetrics().horizontalAdvance('M'));cell_height=max(1,self.fontMetrics().height());view=self.viewport().size()
+        return max(20,min(1000,view.width()//cell_width)),max(4,min(500,view.height()//cell_height))
+    def report_dimensions(self):
+        dimensions=self.terminal_dimensions()
+        if dimensions!=self._reported_dimensions:self._reported_dimensions=dimensions;self.dimensions_changed.emit(*dimensions)
+    def resizeEvent(self,event):
+        super().resizeEvent(event);self.report_dimensions()
     def set_session_active(self,active):
         self.session_active=active;self.caret_phase=True
         if active and self.blink_enabled and self.hasFocus():self.caret_timer.start()
@@ -155,18 +176,14 @@ class Terminal(QPlainTextEdit):
             c.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor); c.removeSelectedText()
         elif command == 'J' and args in ('2', '3'):
             c.select(QTextCursor.Document); c.removeSelectedText()
-        elif command in 'ABCD':
-            move = {'A': QTextCursor.Up, 'B': QTextCursor.Down, 'C': QTextCursor.Right, 'D': QTextCursor.Left}[command]
-            c.movePosition(move, QTextCursor.MoveAnchor, n)
-        elif command in ('H', 'f'):
-            try:
-                row, col = (int(x or '1') for x in (args + ';1').split(';')[:2])
-                c.movePosition(QTextCursor.Start)
-                c.movePosition(QTextCursor.Down, QTextCursor.MoveAnchor, max(0, min(row - 1, 1000)))
-                c.movePosition(QTextCursor.StartOfBlock)
-                c.movePosition(QTextCursor.Right, QTextCursor.MoveAnchor, max(0, min(col - 1, c.block().length() - 1)))
-            except ValueError:
-                pass
+        elif command in 'CD':
+            start=c.block().position();end=start+c.block().length()-1;offset=n if command=='C' else -n
+            c.setPosition(max(start,min(end,c.position()+offset)))
+        # This is a scrollback transcript, not a screen buffer.  Letting an
+        # application move vertically or absolutely would make the next prompt
+        # land in earlier history (common with apt's progress output), so A/B/H/f
+        # are deliberately ignored.  Line erasure and horizontal corrections
+        # remain useful for ordinary command-line output.
 
 
 class Scanner(QThread):
@@ -272,7 +289,7 @@ class SerialConsole(QWidget):
         left = QWidget(); left.setMinimumWidth(220)
         side = QVBoxLayout(left); side.setContentsMargins(0, 0, 16, 0); side.setSpacing(16)
         self.sidebar = QScrollArea(); self.sidebar.setWidgetResizable(True); self.sidebar.setWidget(left)
-        self.sidebar.setMinimumWidth(245); self.sidebar.setMaximumWidth(360); split.addWidget(self.sidebar)
+        self.sidebar.setMinimumWidth(220); self.sidebar.setMaximumWidth(420); split.addWidget(self.sidebar)
         group = QGroupBox('CONNECTION'); form = QFormLayout(group); form.setSpacing(8); form.setRowWrapPolicy(QFormLayout.WrapAllRows); form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow); side.addWidget(group)
         self.port = QComboBox(); self.port.setEditable(True); self.port.setMinimumContentsLength(18)
         form.addRow('Port', self.port)
@@ -325,7 +342,7 @@ class SerialConsole(QWidget):
         self.refresh_ports(); self.refresh_profiles(); self.apply(self.store.last)
         self.timer = QTimer(self); self.timer.timeout.connect(self.poll); self.timer.start(30)
         self.port_timer = QTimer(self); self.port_timer.timeout.connect(self.auto_refresh); self.port_timer.start(3000)
-        split.setStretchFactor(1,1)
+        split.setChildrenCollapsible(True);split.setStretchFactor(1,1);split.setSizes([280,900])
         if profile_error: QTimer.singleShot(0,lambda:self.error('Profiles could not be read',profile_error))
     def statusBar(self): return self
     def showMessage(self,text): self.message.setText(text)
@@ -424,14 +441,16 @@ class SerialConsole(QWidget):
 
     def send(self, data):
         if not self.serial:
-            self.statusBar().showMessage('Connect a device before sending.'); return
+            self.statusBar().showMessage('Connect a device before sending.'); return False
         try:
             count = self.serial.write(data)
             self.tx += count; self.log_data('TX', data[:count]); self.update_counts()
             if self.echo.isChecked(): self.show_data(data[:count])
             if count != len(data): raise IOError(f'Only {count} of {len(data)} bytes were sent.')
+            return True
         except Exception as e:
             self.error('Send failed', e)
+            return False
 
     def send_line(self):
         self.terminal.reveal_live()
@@ -441,7 +460,7 @@ class SerialConsole(QWidget):
                 data += {'None':b'', 'CR':b'\r', 'LF':b'\n', 'CRLF':b'\r\n'}[self.ending.currentText()]
         except ValueError:
             self.error('Invalid hex', 'Use hexadecimal byte pairs, for example: 48 65 6C 6C 6F'); return
-        self.send(data)
+        if self.send(data):self.input.clear()
 
     def send_break(self):
         if self.serial:
@@ -460,7 +479,7 @@ class SerialConsole(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, 'Save session log', str(Path.home() / f"serial-{datetime.now():%Y%m%d-%H%M%S}.jsonl"), 'Session log (*.jsonl)')
         if path:
             try:
-                self.log = open(path, 'a', encoding='utf-8'); self.log_button.setText('● Stop logging'); self.log_button.setToolTip(path)
+                self.log = private_append(path); self.log_button.setText('● Logging'); self.log_button.setToolTip(path+' • click to stop logging')
             except OSError as e: self.error('Could not start logging', e)
 
     def log_data(self, direction, data):
@@ -470,7 +489,7 @@ class SerialConsole(QWidget):
                           hex=data.hex(' '), text=data.decode('utf-8', errors='replace'))
             self.log.write(json.dumps(record, ensure_ascii=True) + '\n'); self.log.flush()
         except OSError as e:
-            self.log.close(); self.log = None; self.log_button.setText('Start logging…'); self.error('Logging stopped', e)
+            self.log.close(); self.log = None; self.log_button.setText('Start logging…'); self.log_button.setToolTip(''); self.error('Logging stopped', e)
 
     def export_view(self):
         path, _ = QFileDialog.getSaveFileName(self, 'Export visible console', str(Path.home() / 'console.txt'), 'Text (*.txt)')
@@ -520,6 +539,11 @@ class SerialConsole(QWidget):
         except ValueError: pass
         self.persist(); self.disconnect()
         if self.log: self.log.close(); self.log=None
+    def adapt_compact_layout(self,window_width):
+        if window_width<760 and not self.sidebar.isHidden():
+            self.sidebar.hide();self._auto_hidden_sidebar=True
+        elif window_width>=760 and getattr(self,'_auto_hidden_sidebar',False):
+            self.sidebar.show();self._auto_hidden_sidebar=False
     def closeEvent(self,event): self.shutdown(); event.accept()
 
 
@@ -671,13 +695,23 @@ class Window(QMainWindow):
             if isinstance(widget,SerialConsole): widget.refresh_profiles()
     def toggle_sidebar(self):
         widget=self.tabs.currentWidget()
-        if isinstance(widget,SerialConsole): widget.sidebar.setVisible(not widget.sidebar.isVisible())
+        if isinstance(widget,SerialConsole):
+            widget._auto_hidden_sidebar=False;widget.sidebar.setVisible(widget.sidebar.isHidden())
         elif isinstance(widget,NetworkConsole):
             sidebar=widget.local_browser if hasattr(widget,'local_browser') else widget.sidebar_area
-            sidebar.setVisible(not sidebar.isVisible())
+            widget._auto_hidden_sidebar=False;sidebar.setVisible(sidebar.isHidden())
+        elif isinstance(widget,FileBrowser):
+            widget._auto_hidden_sidebar=False;widget.sidebar_area.setVisible(widget.sidebar_area.isHidden())
     def zoom_console(self,amount):
         widget=self.tabs.currentWidget()
-        if hasattr(widget,'terminal'): widget.terminal.zoomIn(amount)
+        if hasattr(widget,'terminal'):
+            widget.terminal.zoomIn(amount)
+            widget.terminal.report_dimensions()
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if hasattr(self,'tabs'):
+            for widget in self.widgets():
+                if hasattr(widget,'adapt_compact_layout'):widget.adapt_compact_layout(self.width())
     def busy(self,widget):
         return isinstance(widget,(FileBrowser,TFTPTransfer)) and ((widget.task and widget.task.isRunning()) or bool(getattr(widget,'pending_transfers',False)))
     def close_tab(self,index):
@@ -732,6 +766,7 @@ class Window(QMainWindow):
 def run_smoke_test(app,window,report):
     """Exercise the bundled GUI and platform terminal on a CI machine."""
     import time
+    report.parent.mkdir(parents=True,exist_ok=True)
     started=time.monotonic(); received=[]; finished=[False]
     timer=QTimer(window)
     def finish(error=''):

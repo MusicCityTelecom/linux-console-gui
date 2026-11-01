@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0 — 2026-11-01
+
+- Prevent package-manager and other progress output from moving the live console cursor into older scrollback. The transcript now ignores ANSI vertical and absolute screen-position commands while retaining normal line erasing, carriage returns, backspace, clear-screen support and horizontal corrections.
+- Keep horizontal ANSI corrections on the current line, so a hostile or malformed sequence cannot rewrite older console history. Add regressions for `apt`-style cursor-home/cursor-up output followed by a shell prompt.
+- Resize SSH, Telnet, Mitel TLS Telnet and local PTYs as the console viewport changes. Shells now receive an accurate initial size rather than a fixed 120×40; Telnet sends updated RFC 1073 NAWS data, and Windows uses pywinpty’s public terminal-resize API.
+- Improve compact layouts: smaller collapsible sidebars, useful initial splitter proportions, sidebars that fold away below 760px and restore on expansion, Ctrl+B support in the Remote File Manager, contextual saved-password controls, a clear connected-state badge, visible active logging state, and explicit SCP-transfer/SFTP-browsing labels.
+- Protect new and existing session logs with owner-only permissions on POSIX systems. Reject control characters in all remote file names and paths before they reach FTP/SFTP/SCP operations.
+- Clear serial and network command bars only after successfully queueing a command, preserve typed text on a send failure, and make source-install launchers use the same Python interpreter that validated dependencies.
+- Add source-installer/smoke verification to Linux CI and the publishing workflow, plus terminal-size, compact-layout, Windows PTY, private-log and remote-path regression coverage.
+
 ## 1.5.2 — 2026-10-31
 
 - Make baud-rate discovery listen before sending anything, then optionally send up to five spaced Enter line endings at each rate to wake quiet console prompts. CR, LF or CRLF, timing and probe count are explicit scan controls; echoed blank lines are never treated as a baud candidate.

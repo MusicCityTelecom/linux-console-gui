@@ -44,7 +44,7 @@ link=dest/'current.new'; link.unlink(missing_ok=True); link.symlink_to(release);
 bindir.mkdir(parents=True,exist_ok=True)
 launcher=bindir/'serial-desk'
 import shlex
-launcher.write_text('#!/bin/sh\nexec /usr/bin/python3 '+shlex.quote(str(release/'console_gui.py'))+' "$@"\n'); launcher.chmod(0o755)
+launcher.write_text('#!/bin/sh\nexec '+shlex.quote(sys.executable)+' '+shlex.quote(str(release/'console_gui.py'))+' "$@"\n'); launcher.chmod(0o755)
 apps=pathlib.Path(os.environ['APPS']); apps.mkdir(parents=True,exist_ok=True)
 # Desktop Entry Exec quoting is distinct from shell quoting.
 def desktop_quote(value): return '"'+str(value).replace('\\','\\\\').replace('"','\\"').replace('`','\\`').replace('$','\\$')+'"'

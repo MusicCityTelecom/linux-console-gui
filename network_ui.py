@@ -23,6 +23,28 @@ def button(text, callback, layout):
     b = QPushButton(text); b.clicked.connect(callback); layout.addWidget(b); return b
 
 
+def private_append(path):
+    """Open a transcript with owner-only permissions where the platform supports them."""
+    fd=os.open(path,os.O_WRONLY|os.O_APPEND|os.O_CREAT,0o600)
+    try:
+        if os.name=='posix':os.chmod(path,0o600)
+        return os.fdopen(fd,'a',encoding='utf-8')
+    except Exception:
+        os.close(fd);raise
+
+
+def safe_remote_path(path):
+    if not isinstance(path,str) or not path.strip():raise ValueError('Enter a remote path.')
+    if any(char in path for char in '\r\n\0'):raise ValueError('Remote paths cannot contain control characters.')
+    return path
+
+
+def safe_remote_name(name):
+    if not isinstance(name,str) or name in ('','.','..') or any(char in name for char in '/\\\r\n\0'):
+        raise ValueError('Enter one filename or folder name without path separators or control characters.')
+    return name
+
+
 def answer_credential(parent,worker,title,prompt,secret):
     if worker.isInterruptionRequested():worker.respond_credential(None);return
     dialog=QInputDialog(parent);dialog.setWindowTitle('SSH login — '+title[:120]);dialog.setLabelText(prompt[:2000]);dialog.setTextEchoMode(QLineEdit.Password if secret else QLineEdit.Normal)
@@ -32,7 +54,7 @@ def answer_credential(parent,worker,title,prompt,secret):
 
 class Credentials(QWidget):
     def __init__(self, protocols):
-        super().__init__();self.credential_ref=''; form=QFormLayout(self);self.form=form;form.setRowWrapPolicy(QFormLayout.WrapAllRows)
+        super().__init__();self.credential_ref=''; form=QFormLayout(self);self.form=form;form.setContentsMargins(0,0,0,0);form.setRowWrapPolicy(QFormLayout.WrapAllRows)
         self.protocol=QComboBox();self.protocol.addItems(protocols);form.addRow('Connection type',self.protocol)
         self.host=QLineEdit();self.host.setPlaceholderText('Hostname or IP address');form.addRow('Remote host',self.host)
         self.port=QLineEdit();self.port.setMaximumWidth(100);form.addRow('Port',self.port)
@@ -40,9 +62,10 @@ class Credentials(QWidget):
         self.password=QLineEdit();self.password.setEchoMode(QLineEdit.Password);form.addRow('Password',self.password)
         show=QCheckBox('Show password');show.toggled.connect(lambda visible:self.password.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password));form.addRow(show);self.show_password=show
         self.ssh_auth=QComboBox()
-        for label,value in [('Automatic','auto'),('Password','password'),('Keyboard-interactive / device prompts','interactive'),('Keys / SSH agent','keys')]:self.ssh_auth.addItem(label,value)
+        for label,value in [('Automatic','auto'),('Password','password'),('Keyboard-interactive','interactive'),('Keys / SSH agent','keys')]:self.ssh_auth.addItem(label,value)
+        self.ssh_auth.setMinimumContentsLength(14);self.ssh_auth.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon);self.ssh_auth.setToolTip('Keyboard-interactive supports device and vendor login prompts.')
         form.addRow('SSH login method',self.ssh_auth)
-        self.ssh_legacy=QCheckBox('Legacy SSH algorithms (older devices)');self.ssh_legacy.setToolTip('Per-device compatibility: supported SHA-1 DH/RSA, CBC and older MACs. RSA authentication uses ssh-rsa for old servers. Host fingerprints are still verified. Unsupported SSHv1/removed algorithms are not added.');form.addRow(self.ssh_legacy)
+        self.ssh_legacy=QCheckBox('Legacy SSH compatibility');self.ssh_legacy.setToolTip('Per-device compatibility for older devices: supported SHA-1 DH/RSA, CBC and older MACs. RSA authentication uses ssh-rsa for old servers. Host fingerprints are still verified. Unsupported SSHv1/removed algorithms are not added.');form.addRow(self.ssh_legacy)
         self.key_group=QGroupBox('SSH private key (optional)');self.key_group.setCheckable(True)
         key_layout=QVBoxLayout(self.key_group);self.key_body=QWidget();key_form=QFormLayout(self.key_body);key_form.setRowWrapPolicy(QFormLayout.WrapAllRows);key_layout.addWidget(self.key_body)
         self.key=QLineEdit();self.key.setPlaceholderText('SSH agent / default keys if blank');key_form.addRow('Private key path',self.key)
@@ -142,12 +165,12 @@ class NetworkConsole(QWidget):
         self.connect_button = button('Start terminal' if local else 'Connect', self.toggle, left)
         self.profile_bar=ProfileBar(self.credentials,self.vault,self.toggle); left.insertWidget(0,self.profile_bar)
         left.addStretch()
-        area = QScrollArea(); area.setWidgetResizable(True); area.setWidget(sidebar); area.setMinimumWidth(320); area.setMaximumWidth(350)
+        area = QScrollArea(); area.setWidgetResizable(True); area.setWidget(sidebar); area.setMinimumWidth(240); area.setMaximumWidth(420)
         self.sidebar_area=area
         split.addWidget(area)
-        right = QWidget(); main = QVBoxLayout(right); split.addWidget(right); split.setStretchFactor(1, 1)
+        split.setChildrenCollapsible(True);right = QWidget(); main = QVBoxLayout(right); split.addWidget(right); split.setStretchFactor(1, 1);split.setSizes([300,900])
         row = QHBoxLayout(); main.addLayout(row)
-        self.state = QLabel('Disconnected'); row.addWidget(self.state); row.addStretch()
+        self.state = QLabel('Disconnected');self.state.setObjectName('state'); row.addWidget(self.state); row.addStretch()
         left.removeWidget(self.connect_button);row.addWidget(self.connect_button)
         self.log_button = button('Log…', self.toggle_log, row); button('Clear', lambda: self.terminal.reset(), row)
         self.terminal = terminal_class(); self.terminal.outgoing.connect(self.send); main.addWidget(self.terminal, 1)
@@ -155,10 +178,11 @@ class NetworkConsole(QWidget):
         self.input = QLineEdit(); self.input.setPlaceholderText('Command'); row.addWidget(self.input, 1)
         self.input.returnPressed.connect(self.send_line)
         button('Send', self.send_line, row); button('Ctrl+C', lambda: self.send(b'\x03'), row)
-        password_row=QHBoxLayout();main.addLayout(password_row)
+        self.password_row=QWidget();password_row=QHBoxLayout(self.password_row);password_row.setContentsMargins(0,0,0,0);main.addWidget(self.password_row)
         self.password_button=button('Paste saved password',self.paste_saved_password,password_row);self.password_button.setEnabled(False)
         self.password_button.setToolTip('Send the active SSH profile password without Enter. Use at a password prompt. Outgoing password bytes are redacted from logs; a remote echo or shell history can still reveal them at the wrong prompt.')
         self.password_hint=QLabel('Saved device login • no Enter is sent');self.password_hint.setWordWrap(True);password_row.addWidget(self.password_hint,1)
+        self.password_row.hide()
         tools=QHBoxLayout(); main.addLayout(tools)
         self.sftp_button=button('SFTP ↗',lambda:self.browse('SFTP'),tools)
         self.scp_button=button('SCP ↗',lambda:self.browse('SCP'),tools)
@@ -174,7 +198,8 @@ class NetworkConsole(QWidget):
             self.local_browser=LocalBrowser(self);area.hide();split.insertWidget(0,self.local_browser);split.setSizes([290,0,850])
             self.local_browser.command_requested.connect(self.insert_local_command)
             self.sftp_button.hide(); self.scp_button.hide()
-            self.password_button.hide();self.password_hint.hide()
+            self.password_row.hide()
+        self.terminal.dimensions_changed.connect(self.resize_terminal)
     def saved_password(self):
         if self.vault.locked or self.credentials.protocol.currentText()!='SSH':return ''
         name=self.profile_bar.combo.currentText();profile=self.vault.profiles.get(name)
@@ -185,7 +210,9 @@ class NetworkConsole(QWidget):
         active=self.last_settings or {}
         if settings.get('host')!=active.get('host') or int(settings.get('port',22))!=int(active.get('port',22)) or settings.get('user','')!=active.get('user',''):return ''
         return settings.get('password','')
-    def update_password_button(self):self.password_button.setEnabled(bool(self.worker and self.worker.isRunning() and self.state.text()=='Connected' and self.saved_password()))
+    def update_password_button(self):
+        active=bool(self.worker and self.worker.isRunning() and self.state.text()=='Connected' and self.credentials.protocol.currentText()=='SSH')
+        self.password_row.setVisible(active);self.password_button.setEnabled(bool(active and self.saved_password()))
     def paste_saved_password(self):
         password=self.saved_password()
         if not password or not self.worker or not self.worker.isRunning() or self.state.text()!='Connected':return
@@ -196,7 +223,7 @@ class NetworkConsole(QWidget):
         self.tx+=length;self.counts.setText(f'RX {self.rx:,} B • TX {self.tx:,} B')
         if self.log:
             try:self.log.write(json.dumps(dict(time=datetime.now().astimezone().isoformat(),direction='TX',text='[saved password redacted]',hex='',redacted=True))+'\n');self.log.flush()
-            except OSError as error:self.log.close();self.log=None;self.log_button.setText('Log…');QMessageBox.warning(self,'Logging stopped',str(error))
+            except OSError as error:self.log.close();self.log=None;self.log_button.setText('Log…');self.log_button.setToolTip('');QMessageBox.warning(self,'Logging stopped',str(error))
     def insert_local_command(self,command):
         if self.input.text() and QMessageBox.question(self,'Replace command','Replace the existing command-bar text?')!=QMessageBox.Yes:return
         self.input.setText(command);self.input.setFocus()
@@ -208,7 +235,7 @@ class NetworkConsole(QWidget):
         if self.worker and self.worker.isRunning() and self.worker.ssh_handle:
             self.browse_requested.emit(self,protocol)
     def set_state(self,text):
-        self.state.setText(text);self.terminal.set_session_active(text=='Connected');self.update_focus_hint()
+        self.state.setText(text);self.state.setStyleSheet('color: #46c6ac; font-weight: bold;' if text=='Connected' else '');self.terminal.set_session_active(text=='Connected');self.update_focus_hint()
         self.update_password_button()
         skip=getattr(self,'skip_companion_once',False)
         if text=='Connected':self.skip_companion_once=False
@@ -216,6 +243,14 @@ class NetworkConsole(QWidget):
             if not skip:self.companion_requested.emit(self,self.last_settings.get('file_protocol','SFTP'))
         active=text=='Connected' and self.credentials.protocol.currentText()=='SSH'
         self.sftp_button.setEnabled(active); self.scp_button.setEnabled(active)
+    def resize_terminal(self,columns,rows):
+        if self.worker and hasattr(self.worker,'resize_terminal'):self.worker.resize_terminal(columns,rows)
+    def adapt_compact_layout(self,window_width):
+        sidebar=self.local_browser if hasattr(self,'local_browser') else self.sidebar_area
+        if window_width<760 and not sidebar.isHidden():
+            sidebar.hide();self._auto_hidden_sidebar=True
+        elif window_width>=760 and getattr(self,'_auto_hidden_sidebar',False):
+            sidebar.show();self._auto_hidden_sidebar=False
     def update_focus_hint(self,*args):
         connected=bool(self.worker and self.worker.isRunning() and self.state.text()=='Connected')
         self.focus_hint.setText(('Console keyboard active • Ctrl+Shift+V pastes' if self.terminal.hasFocus() else 'Click console to type • command bar sends a full line') if connected else 'Disconnected • connect before typing')
@@ -229,6 +264,7 @@ class NetworkConsole(QWidget):
         self.last_settings={k:v for k,v in s.items() if k not in ('password','passphrase','key_data')}
         self.title_changed.emit(s.get('host') or 'Local terminal')
         self.worker = Session(s, self)
+        if hasattr(self.worker,'resize_terminal'):self.worker.resize_terminal(*self.terminal.terminal_dimensions())
         if hasattr(self.worker,'credential_requested'):
             worker=self.worker;worker.credential_requested.connect(lambda title,prompt,secret:answer_credential(self,worker,title+' — '+s.get('host',''),prompt,secret))
         if hasattr(self,'local_browser'):self.worker.directory_changed.connect(self.local_browser.terminal_changed)
@@ -248,9 +284,12 @@ class NetworkConsole(QWidget):
         self.credentials.setEnabled(True); self.profile_bar.setEnabled(True); self.connect_button.setEnabled(True); self.connect_button.setText('Connect')
     def send(self,data):
         if self.worker and self.worker.isRunning():
-            try: self.worker.send(data)
+            try: self.worker.send(data);return True
             except Exception as e: QMessageBox.warning(self,'Send failed',str(e))
-    def send_line(self): self.terminal.reveal_live();self.send(self.input.text().encode() + b'\r')
+        return False
+    def send_line(self):
+        self.terminal.reveal_live()
+        if self.send(self.input.text().encode() + b'\r'):self.input.clear()
     def receive(self,data): self.record('RX',data); self.terminal.feed(self.decoder.decode(data))
     def record(self,direction,data):
         if direction == 'RX': self.rx += len(data)
@@ -260,12 +299,12 @@ class NetworkConsole(QWidget):
             try:
                 self.log.write(json.dumps(dict(time=datetime.now().astimezone().isoformat(), direction=direction,hex=data.hex(' '),text=data.decode(errors='replace'))) + '\n'); self.log.flush()
             except OSError as e:
-                self.log.close(); self.log = None; self.log_button.setText('Log…'); QMessageBox.warning(self,'Logging stopped',str(e))
+                self.log.close(); self.log = None; self.log_button.setText('Log…'); self.log_button.setToolTip(''); QMessageBox.warning(self,'Logging stopped',str(e))
     def toggle_log(self):
-        if self.log: self.log.close(); self.log = None; self.log_button.setText('Log…'); return
+        if self.log: self.log.close(); self.log = None; self.log_button.setText('Log…');self.log_button.setToolTip(''); return
         path,_ = QFileDialog.getSaveFileName(self,'Session log',str(Path.home() / 'session.jsonl'),'JSONL (*.jsonl)')
         if path:
-            try: self.log = open(path,'a'); self.log_button.setText('Stop log')
+            try: self.log = private_append(path); self.log_button.setText('● Logging');self.log_button.setToolTip(path+' • click to stop logging')
             except OSError as e: QMessageBox.warning(self,'Log',str(e))
     def prepare_close(self):return self.local_browser.prepare_close() if hasattr(self,'local_browser') else True
     def shutdown(self):
@@ -302,8 +341,8 @@ class FileBrowser(QWidget):
         self.credentials = Credentials(['SFTP','SCP','FTP','FTPS']); left.addWidget(self.credentials)
         self.connect_button = button('Connect', self.connect_remote, left)
         self.profile_bar=ProfileBar(self.credentials,self.vault,self.connect_remote); left.insertWidget(0,self.profile_bar); left.addStretch()
-        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(side); scroll.setMinimumWidth(320); scroll.setMaximumWidth(350); split.addWidget(scroll)
-        right = QWidget(); pane = QVBoxLayout(right); split.addWidget(right); split.setStretchFactor(1,1)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(side); scroll.setMinimumWidth(240); scroll.setMaximumWidth(420); self.sidebar_area=scroll;split.addWidget(scroll)
+        split.setChildrenCollapsible(True);right = QWidget(); pane = QVBoxLayout(right); split.addWidget(right); split.setStretchFactor(1,1);split.setSizes([300,900])
         header=QHBoxLayout();pane.addLayout(header);self.heading=QLabel('Remote File Manager — SFTP / SCP / FTP / FTPS');self.heading.setWordWrap(True);header.addWidget(self.heading,1);left.removeWidget(self.connect_button);header.addWidget(self.connect_button)
         row = QHBoxLayout(); pane.addLayout(row)
         self.path = QLineEdit('.');self.path.setAccessibleName('Remote directory path'); self.path.returnPressed.connect(self.refresh); row.addWidget(self.path,1)
@@ -397,7 +436,8 @@ class FileBrowser(QWidget):
     def connected(self,result):
         self.protocol,self.client,self.remote = result
         self.title_changed.emit(f'{self.protocol} Files · {self.credentials.host.text()}')
-        self.heading.setText(f'Remote File Manager — {self.protocol} · {self.credentials.host.text()}')
+        service='SCP transfers · SFTP browsing' if self.protocol=='SCP' else self.protocol
+        self.heading.setText(f'Remote File Manager — {service} · {self.credentials.host.text()}')
         self.credentials.setEnabled(False); self.profile_bar.setEnabled(False); self.connect_button.setText('Disconnect'); self.path.setText(self.credentials.remote_path.text() or '.')
         self.set_busy(False)
         QTimer.singleShot(0,self.refresh)
@@ -405,7 +445,8 @@ class FileBrowser(QWidget):
         if not self.remote or (self.task and self.task.isRunning()):
             if self.remote: QTimer.singleShot(50,self.refresh)
             return
-        path = self.path.text() or '.'
+        try:path=safe_remote_path(self.path.text() or '.')
+        except ValueError as error:self.status.setText(str(error));return
         def listing(task):
             if self.client:
                 real = self.remote.normalize(path)
@@ -415,10 +456,10 @@ class FileBrowser(QWidget):
             except ftplib.error_perm:
                 rows=[]
                 for n in self.remote.nlst():
-                    name=posixpath.basename(n.rstrip('/'))
-                    if name in ('.','..',''): continue
+                    try:n=safe_remote_path(n);name=safe_remote_name(posixpath.basename(n.rstrip('/')))
+                    except ValueError:continue
                     directory=False
-                    try: self.remote.cwd(n); directory=True; self.remote.cwd(real)
+                    try: self.remote.cwd(n); directory=True; self.remote.cwd(safe_remote_path(real))
                     except ftplib.error_perm: pass
                     rows.append((name,0,directory))
                 return real,rows
@@ -428,7 +469,8 @@ class FileBrowser(QWidget):
         for name,size,directory in sorted(rows,key=lambda r:(not r[2],r[0].lower())):
             row=self.table.rowCount(); self.table.insertRow(row)
             for col,text in enumerate([name,str(size),'Folder' if directory else 'File']): self.table.setItem(row,col,QTableWidgetItem(text))
-        self.status.setText(f'{len(rows)} items • {self.protocol} • double-click a folder or text file');self.filter_listing(self.filter_files.text()); self.progress.setValue(0)
+        mode='SCP transfers · SFTP browsing' if self.protocol=='SCP' else self.protocol
+        self.status.setText(f'{len(rows)} items • {mode} • double-click a folder or text file');self.filter_listing(self.filter_files.text()); self.progress.setValue(0)
     def update_empty(self,busy=False):
         visible=any(not self.table.isRowHidden(row) for row in range(self.table.rowCount()))
         message=('Opening remote connection…' if busy else 'Connect to a remote device to browse files.\nUse a shared device above, or enter a host and Connect.') if self.remote is None else 'No filenames match the filter.' if self.table.rowCount() else 'This remote folder is empty.\nUpload files or create a folder.'
@@ -439,17 +481,23 @@ class FileBrowser(QWidget):
         self.update_empty()
         if self.remote is not None:
             total=self.table.rowCount();count=sum(not self.table.isRowHidden(row) for row in range(total))
-            self.status.setText((f'{count} of {total}' if count!=total else str(total))+f' items • {self.protocol} • double-click folders or text files')
+            mode='SCP transfers · SFTP browsing' if self.protocol=='SCP' else self.protocol
+            self.status.setText((f'{count} of {total}' if count!=total else str(total))+f' items • {mode} • double-click folders or text files')
     def selection(self):
         row=self.table.currentRow()
         if row<0 or self.table.isRowHidden(row):raise ValueError('Select a visible file or folder.')
-        return self.table.item(row,0).text(),self.table.item(row,2).text() == 'Folder'
-    def up(self): self.path.setText(posixpath.dirname(self.path.text().rstrip('/')) or '/'); self.refresh()
+        return safe_remote_name(self.table.item(row,0).text()),self.table.item(row,2).text() == 'Folder'
+    def up(self):
+        try:self.path.setText(posixpath.dirname(safe_remote_path(self.path.text()).rstrip('/')) or '/')
+        except ValueError as error:self.status.setText(str(error));return
+        self.refresh()
     def open_item(self):
-        try: name,directory=self.selection()
-        except ValueError: return
-        if directory: self.path.setText(posixpath.join(self.path.text(),name)); self.refresh()
-        else: self.edit_text()
+        try:
+            name,directory=self.selection()
+            if directory:self.path.setText(self.remote_path(name)); self.refresh()
+            else:self.edit_text()
+        except ValueError as error:
+            self.status.setText(str(error))
     def copy_path(self):
         from PyQt5.QtWidgets import QApplication
         try:name,_=self.selection();QApplication.clipboard().setText(self.remote_path(name))
@@ -504,17 +552,19 @@ class FileBrowser(QWidget):
         name,ok=QInputDialog.getText(self,'New remote text file','Filename:')
         if not ok or not name:return
         if name in ('.','..') or any(char in name for char in '/\\\r\n\0'):QMessageBox.warning(self,'Filename','Enter a single filename.');return
-        path=self.remote_path(name)
+        try:path=self.remote_path(name)
+        except ValueError as error:QMessageBox.warning(self,'New remote text',str(error));return
         def create(task):
             with self.remote.open(path,'wx'):pass
             self.remote.chmod(path,0o600)
         self.run(create,lambda result:QTimer.singleShot(0,self.refresh))
-    def remote_path(self,name): return posixpath.join(self.path.text(),name)
+    def remote_path(self,name): return posixpath.join(safe_remote_path(self.path.text() or '.'),safe_remote_name(name))
     def cancel_transfers(self):
         self.cancel_requested=True
         if self.task:self.task.requestInterruption()
         self.cancel_button.setEnabled(False);self.status.setText('Cancelling transfers… An interrupted upload may leave a partial remote file.')
     def transfer(self,local,remote,upload,done=None):
+        remote=safe_remote_path(remote)
         def job(task):
             import tempfile
             from tftp_transfer import TransferCancelled
@@ -573,8 +623,10 @@ class FileBrowser(QWidget):
         files=[path for path in paths if Path(path).is_file()]
         if len(files)!=len(paths): QMessageBox.warning(self,'Upload','Select files. Folder uploads are not supported.'); return
         if not files: return
+        try:jobs=[(path,self.remote_path(Path(path).name),True) for path in files]
+        except ValueError as error:QMessageBox.warning(self,'Upload',str(error));return
         if QMessageBox.question(self,'Upload files',f'Upload {len(files)} file(s) to {self.path.text()}? Existing remote files with matching names will be replaced.') != QMessageBox.Yes: return
-        self.run_transfers([(path,self.remote_path(Path(path).name),True) for path in files])
+        self.run_transfers(jobs)
     def upload(self):
         if not self.remote: return
         files,_=QFileDialog.getOpenFileNames(self,'Upload files')
@@ -585,28 +637,36 @@ class FileBrowser(QWidget):
         if not names: QMessageBox.warning(self,'Download','Select one or more files.'); return
         if len(names)==1:
             local,_=QFileDialog.getSaveFileName(self,'Download file',str(Path.home()/posixpath.basename(names[0])))
-            if local: self.run_transfers([(local,self.remote_path(names[0]),False)])
+            if local:
+                try:self.run_transfers([(local,self.remote_path(names[0]),False)])
+                except ValueError as error:QMessageBox.warning(self,'Download',str(error))
         else:
             folder=QFileDialog.getExistingDirectory(self,'Download files to folder')
             if not folder: return
-            jobs=[(str(Path(folder)/posixpath.basename(name)),self.remote_path(name),False) for name in names]
+            try:jobs=[(str(Path(folder)/posixpath.basename(name)),self.remote_path(name),False) for name in names]
+            except ValueError as error:QMessageBox.warning(self,'Download',str(error));return
             if any(Path(local).exists() for local,_,_ in jobs) and QMessageBox.question(self,'Replace local files','Some destination files already exist. Replace them?') != QMessageBox.Yes: return
             self.run_transfers(jobs)
     def mkdir(self):
         if not self.remote: return
         name,ok=QInputDialog.getText(self,'New folder','Folder name:')
-        if ok and name and name not in ('.','..') and '/' not in name and '\0' not in name:
-            path=self.remote_path(name)
-            self.run(lambda task:self.remote.mkdir(path) if self.client else self.remote.mkd(path),lambda r:QTimer.singleShot(0,self.refresh))
+        if not ok:return
+        try:path=self.remote_path(name)
+        except ValueError as error:QMessageBox.warning(self,'New folder',str(error));return
+        self.run(lambda task:self.remote.mkdir(path) if self.client else self.remote.mkd(path),lambda r:QTimer.singleShot(0,self.refresh))
     def rename(self):
         if not self.remote: return
         try: old,_=self.selection()
         except ValueError as e: QMessageBox.warning(self,'Rename',str(e)); return
-        if any(e.snapshot['path']==self.remote_path(old) for e in self.editors):QMessageBox.information(self,'Rename','Close the text editor for this file before renaming it.');return
+        try:old_path=self.remote_path(old)
+        except ValueError as error:QMessageBox.warning(self,'Rename',str(error));return
+        if any(e.snapshot['path']==old_path for e in self.editors):QMessageBox.information(self,'Rename','Close the text editor for this file before renaming it.');return
         name,ok=QInputDialog.getText(self,'Rename','New name:',text=old)
-        if ok and name and name not in ('.','..') and '/' not in name and '\0' not in name:
-            if QMessageBox.question(self,'Rename',f'Rename {old} to {name}?') == QMessageBox.Yes:
-                self.run(lambda task:self.remote.rename(self.remote_path(old),self.remote_path(name)),lambda r:QTimer.singleShot(0,self.refresh))
+        if not ok:return
+        try:new_path=self.remote_path(name)
+        except ValueError as error:QMessageBox.warning(self,'Rename',str(error));return
+        if QMessageBox.question(self,'Rename',f'Rename {old} to {name}?') == QMessageBox.Yes:
+            self.run(lambda task:self.remote.rename(old_path,new_path),lambda r:QTimer.singleShot(0,self.refresh))
     def close_remote(self):
         if self.remote:
             try: self.remote.close()
@@ -616,6 +676,11 @@ class FileBrowser(QWidget):
         elif self.client and self.owns_client: self.client.close()
         self.owns_client=True
         self.remote=self.client=None; self.credentials.setEnabled(True); self.profile_bar.setEnabled(True); self.connect_button.setText('Connect'); self.table.setRowCount(0);self.set_busy(False);self.status.setText('Disconnected • choose a shared device or enter a host.');self.heading.setText('Remote File Manager — SFTP / SCP / FTP / FTPS')
+    def adapt_compact_layout(self,window_width):
+        if window_width<760 and not self.sidebar_area.isHidden():
+            self.sidebar_area.hide();self._auto_hidden_sidebar=True
+        elif window_width>=760 and getattr(self,'_auto_hidden_sidebar',False):
+            self.sidebar_area.show();self._auto_hidden_sidebar=False
     def shutdown(self):
         if self.task and self.task.isRunning():
             self.task.requestInterruption(); self.task.respond(False)

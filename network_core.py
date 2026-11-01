@@ -25,6 +25,16 @@ class TelnetCodec:
     def __init__(self):
         self.pending = bytearray()
         self.accepted = set()
+        self.columns,self.rows = 120,40
+
+    def set_dimensions(self,columns,rows):
+        self.columns=max(20,min(1000,int(columns)));self.rows=max(4,min(500,int(rows)))
+
+    def naws(self):
+        # Escape 0xff inside the two 16-bit values, as required in Telnet SB data.
+        width=struct.pack('!H',self.columns).replace(b'\xff',b'\xff\xff')
+        height=struct.pack('!H',self.rows).replace(b'\xff',b'\xff\xff')
+        return b'\xff\xfa\x1f'+width+height+b'\xff\xf0'
 
     def feed(self, data):
         self.pending.extend(data)
@@ -43,7 +53,7 @@ class TelnetCodec:
                     if cmd == 251: reply.extend(bytes([255, 253 if opt in (0, 1, 3) else 254, opt]))
                     elif cmd == 253:
                         reply.extend(bytes([255, 251 if opt in (0, 3, 24, 31) else 252, opt]))
-                        if opt == 31: reply.extend(b'\xff\xfa\x1f\x00\x78\x00\x28\xff\xf0')
+                        if opt == 31: reply.extend(self.naws())
                     self.accepted.add(key)
                 i += 3; continue
             if cmd == 250:
@@ -60,6 +70,18 @@ class TelnetCodec:
     @staticmethod
     def encode(data):
         return data.replace(b'\xff', b'\xff\xff')
+
+
+def resize_windows_pty(process, columns, rows):
+    """Resize pywinpty across its supported high- and low-level APIs."""
+    if hasattr(process, 'setwinsize'):
+        # PtyProcess uses rows, columns; this is the public pywinpty API.
+        process.setwinsize(rows, columns)
+    elif hasattr(process, 'set_size'):
+        # Older wrappers expose the underlying PTY's columns, rows API.
+        process.set_size(columns, rows)
+    elif hasattr(getattr(process, 'pty', None), 'set_size'):
+        process.pty.set_size(columns, rows)
 
 
 def fingerprint(key):
@@ -165,7 +187,7 @@ class Session(QThread):
     credential_requested=pyqtSignal(str,str,bool)
     def __init__(self, settings, parent=None):
         super().__init__(parent); self.settings = settings; self.output = queue.Queue(maxsize=1024)
-        self.event = threading.Event(); self.answer = False; self.dimensions = (120, 40); self.ssh_handle = None
+        self.event = threading.Event(); self.answer = False; self.dimensions = (120, 40); self._dimensions_lock=threading.Lock(); self.ssh_handle = None
         self.credential_event=threading.Event();self.credential_answer=None
     def request_credential(self,title,prompt,secret=True):
         self.credential_event.clear();self.credential_answer=None;self.credential_requested.emit(title,prompt,secret)
@@ -179,6 +201,12 @@ class Session(QThread):
             if self.isInterruptionRequested(): return False
         return self.answer
     def respond(self, answer): self.answer = answer; self.event.set()
+    def resize_terminal(self,columns,rows):
+        try:dimensions=(max(20,min(1000,int(columns))),max(4,min(500,int(rows))))
+        except (TypeError,ValueError):return
+        with self._dimensions_lock:self.dimensions=dimensions
+    def terminal_dimensions(self):
+        with self._dimensions_lock:return self.dimensions
     def send(self, data): self.output.put_nowait(data)
     def send_secret(self,data):self.output.put_nowait((data,True))
     def stop(self): self.requestInterruption(); self.event.set()
@@ -186,16 +214,17 @@ class Session(QThread):
         s = self.settings; sock = client = channel = process = None; master = None; winproc = None
         last_directory=None;directory_poll=0
         try:
-            protocol = s['protocol']; codec = TelnetCodec()
+            protocol = s['protocol']; codec = TelnetCodec(); applied_dimensions=None
             local_cwd=s.get('local_cwd') or str(Path.home())
             if protocol=='Local terminal' and not Path(local_cwd).is_dir():local_cwd=str(Path.home())
+            columns,rows=self.terminal_dimensions();codec.set_dimensions(columns,rows)
             if protocol == 'Local terminal' and os.name=='nt':
                 from winpty import PtyProcess
-                winproc=PtyProcess.spawn([os.environ.get('COMSPEC','cmd.exe'),'/Q'],cwd=local_cwd,dimensions=(40,120))
+                winproc=PtyProcess.spawn([os.environ.get('COMSPEC','cmd.exe'),'/Q'],cwd=local_cwd,dimensions=(rows,columns))
             elif protocol == 'Local terminal':
                 import pty, fcntl, termios
                 master, slave = pty.openpty()
-                fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
+                fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0))
                 shell = os.environ.get('SHELL', '/bin/bash')
                 helper = 'import fcntl,termios,os,sys; fcntl.ioctl(0,termios.TIOCSCTTY,0); os.execv(sys.argv[1],[sys.argv[1],"-i"])'
                 process = subprocess.Popen(['/usr/bin/python3', '-c', helper, shell], stdin=slave, stdout=slave, stderr=slave,
@@ -204,7 +233,7 @@ class Session(QThread):
             elif protocol == 'SSH':
                 client = ssh_connect(s, self.ask,self.request_credential)
                 self.ssh_handle = SharedSSH(client)
-                channel = client.invoke_shell(term='vt100', width=120, height=40); channel.settimeout(.2)
+                channel = client.invoke_shell(term='vt100', width=columns, height=rows); channel.settimeout(.2);applied_dimensions=(columns,rows)
             else:
                 sock = socket.create_connection((s['host'], int(s['port'])), timeout=10)
                 if protocol == 'Mitel TLS Telnet':
@@ -221,6 +250,17 @@ class Session(QThread):
             for secret in ('password','passphrase','key_data'): self.settings.pop(secret, None)
             self.state.emit('Connected')
             while not self.isInterruptionRequested():
+                dimensions=self.terminal_dimensions()
+                if dimensions!=applied_dimensions:
+                    columns,rows=dimensions;codec.set_dimensions(columns,rows)
+                    if channel:channel.resize_pty(width=columns,height=rows)
+                    elif master is not None:
+                        import fcntl,termios
+                        fcntl.ioctl(master,termios.TIOCSWINSZ,struct.pack('HHHH',rows,columns,0,0))
+                    elif winproc is not None:
+                        resize_windows_pty(winproc,columns,rows)
+                    elif sock and (253,31) in codec.accepted:sock.sendall(codec.naws())
+                    applied_dimensions=dimensions
                 if (process is not None or winproc is not None) and time.monotonic()>=directory_poll:
                     directory_poll=time.monotonic()+.4
                     try:

@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 if os.name != 'nt':
     import pty
@@ -8,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtCore import Qt
 from PyQt5.QtTest import QTest
 from serial_core import DEFAULTS, ProfileStore, open_port, text_score, scan_rates
@@ -69,6 +70,48 @@ class SerialDeskTests(unittest.TestCase):
         sent = []; t.outgoing.connect(sent.append)
         QTest.keyClick(t, Qt.Key_C, Qt.ControlModifier)
         self.assertEqual(sent, [b'\x03'])
+
+    def test_terminal_screen_positioning_never_rewrites_scrollback(self):
+        t = Terminal()
+        t.feed('installer@host:~$ sudo apt install btop\r\nInstalling: btop\r\nDone\r\n')
+        transcript=t.toPlainText()
+        # Package managers commonly use these while painting transient progress
+        # lines.  The compact transcript must keep the following prompt at end.
+        t.feed('\x1b[H\x1b[3Ainstaller@host:~$ ')
+        self.assertEqual(t.toPlainText(),transcript+'installer@host:~$ ')
+
+    def test_terminal_horizontal_correction_stays_on_live_line(self):
+        t=Terminal();t.feed('older history\r\nlive text')
+        t.feed('\x1b[999D!')
+        self.assertEqual(t.toPlainText(),'older history\n!ive text')
+
+    def test_terminal_reports_usable_dimensions(self):
+        t=Terminal();reported=[];t.dimensions_changed.connect(lambda columns,rows:reported.append((columns,rows)))
+        t.resize(800,400);t.show();APP.processEvents()
+        columns,rows=t.terminal_dimensions()
+        self.assertGreaterEqual(columns,20);self.assertGreaterEqual(rows,4);self.assertIn((columns,rows),reported);t.close()
+
+    def test_smoke_test_creates_report_parent(self):
+        from console_gui import run_smoke_test
+        class Window(QWidget):
+            class Tabs:
+                def count(self):return 5
+            tabs=Tabs()
+        with tempfile.TemporaryDirectory() as d:
+            report=Path(d)/'missing'/'smoke.json'
+            # The parent is created before the asynchronous terminal check starts.
+            window=Window()
+            with patch('console_gui.QTimer.singleShot'):
+                run_smoke_test(APP,window,report)
+            self.assertTrue(report.parent.is_dir())
+            window.close()
+
+    @unittest.skipIf(os.name!='posix','POSIX mode bits')
+    def test_session_logs_are_owner_only(self):
+        from console_gui import private_append
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'session.jsonl';log=private_append(path);log.write('private\n');log.close()
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o600)
 
     @unittest.skipIf(os.name=='nt','POSIX serial pseudo-terminal integration test')
     def test_real_pseudo_terminal_rx_tx_log_disconnect(self):

@@ -14,8 +14,8 @@ from pathlib import Path
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QSettings
-from network_core import TelnetCodec, Session, Task, fingerprint, ssh_connect
-from network_ui import FileBrowser, Notepad
+from network_core import TelnetCodec, Session, Task, fingerprint, resize_windows_pty, ssh_connect
+from network_ui import FileBrowser, Notepad, safe_remote_name, safe_remote_path
 from updates import version_tuple, latest_release, download_release, extract_source
 import paramiko
 APP=QApplication.instance() or QApplication([])
@@ -40,6 +40,35 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(c.feed(b'\xff\xff'),(b'\xff',b''))
         self.assertEqual(c.encode(b'\x01\xff'),b'\x01\xff\xff')
         self.assertEqual(c.feed(b'\xff\xfb\x63'),(b'',b'\xff\xfe\x63'))
+
+    def test_telnet_window_size_uses_current_dimensions(self):
+        c=TelnetCodec();c.set_dimensions(255,41)
+        self.assertEqual(c.feed(b'\xff\xfd\x1f'),(b'',b'\xff\xfb\x1f\xff\xfa\x1f\x00\xff\xff\x00)\xff\xf0'))
+
+    def test_windows_pty_resize_uses_public_rows_columns_api(self):
+        class Process:
+            def __init__(self):self.calls=[]
+            def setwinsize(self,rows,columns):self.calls.append((rows,columns))
+        process=Process();resize_windows_pty(process,101,37)
+        self.assertEqual(process.calls,[(37,101)])
+
+    def test_windows_pty_resize_supports_low_level_compatibility_api(self):
+        class Pty:
+            def __init__(self):self.calls=[]
+            def set_size(self,columns,rows):self.calls.append((columns,rows))
+        class Process:
+            def __init__(self):self.pty=Pty()
+        process=Process();resize_windows_pty(process,101,37)
+        self.assertEqual(process.pty.calls,[(101,37)])
+
+    def test_remote_paths_reject_control_characters(self):
+        self.assertEqual(safe_remote_path('/configs/site'),' /configs/site'.strip())
+        self.assertEqual(safe_remote_name('startup.cfg'),'startup.cfg')
+        for value in ('bad\rNOOP','bad\nNOOP','bad\0NOOP'):
+            with self.assertRaises(ValueError):safe_remote_path(value)
+            with self.assertRaises(ValueError):safe_remote_name(value)
+        for value in ('','..','folder/file','folder\\file'):
+            with self.assertRaises(ValueError):safe_remote_name(value)
 
     def test_telnet_live_connection(self):
         listener=socket.socket(); listener.bind(('127.0.0.1',0)); listener.listen()
@@ -133,6 +162,32 @@ class NetworkTests(unittest.TestCase):
             finally: worker.stop(); worker.wait(5000)
             self.assertFalse(errors)
 
+    def test_ssh_terminal_size_tracks_session_resize(self):
+        key=paramiko.RSAKey.generate(2048);listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen();sizes=[];stopped=threading.Event()
+        class Server(paramiko.ServerInterface):
+            def check_auth_password(self,user,password):return paramiko.AUTH_SUCCESSFUL
+            def get_allowed_auths(self,user):return 'password'
+            def check_channel_request(self,kind,channel):return paramiko.OPEN_SUCCEEDED
+            def check_channel_pty_request(self,channel,term,width,height,*args):sizes.append(('initial',width,height));return True
+            def check_channel_window_change_request(self,channel,width,height,*args):sizes.append(('resize',width,height));return True
+            def check_channel_shell_request(self,*args):return True
+        def serve():
+            try:
+                with listener.accept()[0] as sock:
+                    transport=paramiko.Transport(sock);transport.add_server_key(key);transport.start_server(server=Server());channel=transport.accept(5)
+                    while channel and transport.is_active() and not stopped.wait(.02):pass
+                    transport.close()
+            finally:listener.close()
+        threading.Thread(target=serve,daemon=True).start()
+        with tempfile.TemporaryDirectory() as d,patch('network_core.CONFIG',Path(d)):
+            worker=Session(dict(protocol='SSH',host='127.0.0.1',port=listener.getsockname()[1],user='tester',password='secret'));errors=[];worker.failed.connect(errors.append);worker.question.connect(lambda *_:worker.respond(True));worker.resize_terminal(88,29);worker.start()
+            try:
+                self.assertTrue(pump_until(lambda:('initial',88,29) in sizes),repr(sizes)+repr(errors))
+                worker.resize_terminal(101,37)
+                self.assertTrue(pump_until(lambda:('resize',101,37) in sizes),repr(sizes)+repr(errors))
+            finally:stopped.set();worker.stop();worker.wait(5000)
+            self.assertFalse(errors)
+
     def test_source_archive_traversal_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             archive=Path(d)/'bad.tar.gz'
@@ -176,6 +231,12 @@ class NetworkTests(unittest.TestCase):
             w=Window(); w.updates.task=None; w.show(); w.resize(800,600); APP.processEvents()
             self.assertLessEqual(w.width(),800); self.assertLessEqual(w.height(),600)
             self.assertEqual(w.tabs.count(),5)
+            w.tabs.setCurrentWidget(w.files);APP.processEvents();self.assertTrue(w.files.sidebar_area.isVisible());w.toggle_sidebar();self.assertFalse(w.files.sidebar_area.isVisible());w.toggle_sidebar();self.assertTrue(w.files.sidebar_area.isVisible())
+            w.tabs.setCurrentWidget(w.network);reported=[];w.network.terminal.dimensions_changed.connect(lambda columns,rows:reported.append((columns,rows)));w.zoom_console(1);self.assertTrue(reported)
+            w.resize(640,420);APP.processEvents()
+            for sidebar in (w.serial_tab.sidebar,w.network.sidebar_area,w.files.sidebar_area,w.local.local_browser):self.assertTrue(sidebar.isHidden())
+            w.resize(800,600);APP.processEvents()
+            for sidebar in (w.serial_tab.sidebar,w.network.sidebar_area,w.files.sidebar_area,w.local.local_browser):self.assertFalse(sidebar.isHidden())
             w.showMaximized(); APP.processEvents(); self.assertTrue(w.isMaximized()); w.close()
 
 

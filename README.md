@@ -22,14 +22,14 @@ A native Linux and Windows desktop toolkit for serial consoles, network maintena
 - **Remote File Manager:** browse SFTP, SCP, FTP and explicit FTPS servers; upload/download individual or multiple files, drag local files into the browser to upload, create folders and rename. On an authenticated SSH tab, click **SFTP ↗** or **SCP ↗** to open a new browser tab using the existing connection without another login. File tabs retain their own channel and can continue after the shell tab closes. Folder transfers are not supported. SCP mode browses using SFTP and transfers through the legacy SCP protocol, so browsing requires SFTP support on the server.
 - **Notepad:** local scratchpad saved automatically, with open and save-copy actions.
 - **Local terminal:** interactive shell for ping, SSH commands and other installed tools. No elevated privileges unless you explicitly run sudo.
-- **Resizable UI:** maximize button, F11 maximize/restore, high-DPI scaling, scrollable settings, Ctrl+B to hide serial settings, and console font zoom from the View menu. Tested at 800×600.
+- **Responsive UI:** maximize button, F11 maximize/restore, high-DPI scaling, scrollable settings, and console font zoom from the View menu. Session sidebars fold away automatically on compact windows and Ctrl+B shows or hides the active sidebar. Tested at 640×420 and 800×600.
 - **Updates:** background GitHub release check at startup; accept installation or decline. Manual checks and a disable-startup-check option are in the Updates menu. Installers are checked against the release SHA256SUMS file.
 
-The terminal handles basic cursor/erase sequences and UTF-8 text. It is a maintenance console, not a full VT100 emulator: ANSI colors and full-screen editors are not supported. Use a dedicated terminal emulator for those applications.
+The terminal automatically tells SSH, Telnet and local shells its visible size, and handles UTF-8, carriage-return progress updates, line erasing and basic horizontal cursor corrections. It is a scrollback-oriented maintenance console, not a full VT100 emulator: vertical/absolute screen positioning, ANSI colors and full-screen editors are not supported. This keeps tools such as package managers from rewriting older console history. Use a dedicated terminal emulator for full-screen applications.
 
 ## Windows version
 
-Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.5.2). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
+Download the per-user installer or portable ZIP from the separate [Windows release](https://github.com/MusicCityTelecom/linux-console-gui/releases/tag/windows-v1.6.0). Windows 10 1809+ / Windows 11 x64 are supported. Python is bundled. A Windows source ZIP is included in that release; it uses the same application source plus Windows-specific installation and build scripts.
 
 See [Windows installation, source and build instructions](docs/WINDOWS.md). The Windows local terminal runs Command Prompt, COM ports use Windows names, and local credential keys use Windows DPAPI. Startup update checks select the matching Windows release channel.
 
@@ -38,7 +38,7 @@ See [Windows installation, source and build instructions](docs/WINDOWS.md). The 
 For **Ubuntu 24.04+ / Debian 13+** with Python 3.12 or newer:
 
 ```sh
-sudo apt install ./serial-desk_1.5.2_all.deb
+sudo apt install ./serial-desk_1.6.0_all.deb
 serial-desk
 ```
 
@@ -55,7 +55,7 @@ sh install-source.sh
 ~/.local/bin/serial-desk
 ```
 
-The source installer does not require root. It installs a versioned copy under `$XDG_DATA_HOME/serial-desk` (default `~/.local/share/serial-desk`) and a launcher in `~/.local/bin`. Previous versions are retained. Updates from source use the same installer. The source tree can also be run directly with `python3 console_gui.py` after dependencies are installed. `requirements.txt` is provided for virtual environments; do not override your distribution's managed-Python protections.
+The source installer does not require root. It installs a versioned copy under `$XDG_DATA_HOME/serial-desk` (default `~/.local/share/serial-desk`) and a launcher in `~/.local/bin`. Previous versions are retained. Updates from source use the same installer. The launcher uses the Python interpreter that ran the installer, so virtual-environment installs keep using their installed dependencies. The source tree can also be run directly with `python3 console_gui.py` after dependencies are installed. `requirements.txt` is provided for virtual environments; do not override your distribution's managed-Python protections.
 
 For an isolated installation, use `sh install-source.sh --prefix /absolute/directory`; the launcher, application and desktop file stay under that prefix.
 
